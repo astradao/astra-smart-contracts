@@ -6,7 +6,6 @@ const { signTypedData } = require('eth-sig-util');
 
 const MAX_DEPLOYED_BYTECODE_SIZE = 24576;
 const Astrsample = contract.fromArtifact('Token');
-const TransferHandler = contract.fromArtifact('MockTransferHandler');
 
 const {
     address,
@@ -20,7 +19,7 @@ const EIP712 = require('../../Util/EIP712');
 const zeroaddress = "0x0000000000000000000000000000000000000000";
 const decimal = new BN(18);
 const oneether = (new BN(10)).pow(decimal);
-const totalSupply = (new BN(1000000000)).mul(oneether)
+const totalSupply = (new BN(100000000000000)).mul(oneether)
 
 describe('Initializing', function () {
     const [ownerAddress, userAddress1, userAddress2, userAddress3] = accounts;
@@ -29,76 +28,51 @@ describe('Initializing', function () {
     beforeEach(async function () {
         this.astra = await Astrsample.new({ from: ownerAddress, gas: 8000000 });
         await this.astra.initialize(ownerAddress, { from: ownerAddress });
-        this.handler = await TransferHandler.new({ from: ownerAddress, gas: 8000000 });
     });
 
     describe("Astra pausable functionality", function () {
-        beforeEach(async function () {
-            await this.astra.setTransferHandler(this.handler.address, { from: ownerAddress });
-        });
+        beforeEach(async function () {});
         describe("Checking inital conditions",function(){
             it("Should be able to transfer tokens", async function () {
                 await this.astra.transfer(userAddress1, (new BN(500).mul(oneether)), { from: ownerAddress })
                 expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal((new BN(500).mul(oneether)));
             });
-            it("Only owner can set the timelock address", async function () {
-                await expectRevert(this.astra.SetTimelock(ownerAddress,{from:userAddress1}),"Ownable: caller is not the owner");
-            }); 
             it("Should not pause the contract", async function () {
-                await expectRevert(this.astra.pauseToken({from:ownerAddress}),"pauseToken: Only timelock can call");
+                await expectRevert(this.astra.pause({from:userAddress1}),"Ownable: caller is not the owner");
             });  
-        })
-        describe("Checking Time lock functionality",function(){
-            it("Only owner can set the timelock address", async function () {
-                await expectRevert(this.astra.SetTimelock(ownerAddress,{from:userAddress1}),"Ownable: caller is not the owner");
-            }); 
-            it("Should not pause the contract", async function () {
-                await expectRevert(this.astra.pauseToken({from:ownerAddress}),"pauseToken: Only timelock can call");
-            }); 
-            it("Shoud revert if same address is passed",async function(){
-                await this.astra.SetTimelock(userAddress1,{from: ownerAddress});
-                await expectRevert(this.astra.SetTimelock(userAddress1,{from: ownerAddress}),"SetTimelock: Already Timelock");
-            })
-            it("Should be able to pause tokens", async function () {
-                await this.astra.SetTimelock(userAddress1,{from: ownerAddress});
-                await this.astra.pauseToken({from:userAddress1})
-                expect(await this.astra.paused()).to.be.equal(true);
-            }); 
         })
         describe("Checking Pause condition",function(){
             beforeEach(async function () {
-                await this.astra.SetTimelock(userAddress1,{from: ownerAddress});
             });
             it("Should be able to pause tokens", async function () {
-                await this.astra.pauseToken({from:userAddress1})
+                await this.astra.pause({from:ownerAddress})
                 expect(await this.astra.paused()).to.be.equal(true);
             });
             it("Should Revert the transaction after revert", async function () {
-                await this.astra.pauseToken({from:userAddress1})
-                await expectRevert(this.astra.transfer(userAddress1, (new BN(50000).mul(oneether)), { from: ownerAddress }),"Transfer: Token is paused");
+                await this.astra.pause({from:ownerAddress})
+                await expectRevert(this.astra.transfer(userAddress1, (new BN(50000).mul(oneether)), { from: ownerAddress }),"Pausable: paused");
             }); 
             it("Should Revert if pause is called more then once", async function () {
-                await this.astra.pauseToken({from:userAddress1})
-                await expectRevert(this.astra.pauseToken({from:userAddress1}),"pauseToken: Already paused");
+                await this.astra.pause({from:ownerAddress})
+                await expectRevert(this.astra.pause({from:ownerAddress}),"Pausable: paused");
             });  
         })
         describe("Checking unpause condition",function(){
             beforeEach(async function () {
-                await this.astra.SetTimelock(userAddress1,{from: ownerAddress});
-                await this.astra.pauseToken({from:userAddress1})
+                await this.astra.pause({from:ownerAddress})
             });
             it("Should be able to unpause tokens", async function () {
-                await this.astra.unpauseToken({from:userAddress1})
+                await this.astra.unpause({from:ownerAddress})
                 expect(await this.astra.paused()).to.be.equal(false);
             });
             it("Should transfer the tokens now", async function () {
-                await this.astra.unpauseToken({from:userAddress1})
+                await this.astra.unpause({from:ownerAddress})
                 await this.astra.transfer(userAddress1, (new BN(500).mul(oneether)), { from: ownerAddress })
                 expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal((new BN(500).mul(oneether)));
             }); 
             it("Should Revert if unpause is called more then once", async function () {
-                await this.astra.unpauseToken({from:userAddress1})
-                await expectRevert(this.astra.unpauseToken({from:userAddress1}),"unpauseToken: Already unpaused");
+                await this.astra.unpause({from:ownerAddress})
+                await expectRevert(this.astra.unpause({from:ownerAddress}),"Pausable: not paused");
             });  
         })
     });
@@ -121,33 +95,56 @@ describe('Initializing', function () {
         describe("Checking Initial permission", function () {
             it("Should not mint new tokens", async function () {
                 const address = userAddress1;
-                // await this.astra.mintNewTokens(address, totalSupply, { from: ownerAddress });
-                await expectRevert(this.astra.mintNewTokens(address,1000,{from:ownerAddress}),"Call must come from Timelock");
-            })
-            it("Initial Timelock should be 0x", async function () {
-                expect(await this.astra.transferHandler()).to.be.equal(zeroaddress);
+                // await this.astra.mint(address, totalSupply, { from: ownerAddress });
+                await expectRevert(this.astra.mint(address,1000,{from:userAddress1}),"Ownable: caller is not the owner");
             })
         })
 
-        describe("Configuring Astra contract", function () {
-            it("Set the address of Transfer Handler", async function () {
-                await this.astra.setTransferHandler(this.handler.address, { from: ownerAddress });
-                expect(await this.astra.transferHandler()).to.be.equal(this.handler.address);
+        describe("Anti bot mechanism", function(){
+            beforeEach(async function () {
+                await this.astra.setPairAddress(userAddress1, { from:ownerAddress });
+                let _time = await time.latestBlock();
+                await this.astra.setStartBlock(_time, { from:ownerAddress });
+                await this.astra.setSellLimitTime((parseInt(_time)+10), { from:ownerAddress });
             });
-            it("Set minter", async function () {
-                await this.astra.setMinter(ownerAddress, { from: ownerAddress });
-                expect(await this.astra.minter(ownerAddress)).to.be.equal(true);
-            });
-        });
+
+            it("User tries to trade more that eligible amount", async function () {
+                await expectRevert(this.astra.transfer(userAddress1,(new BN(2000000000000).mul(oneether)), { from:ownerAddress }),"Trade amount reached");
+            })
+
+            it("User trade less than max amount", async function () {
+                await this.astra.transfer(userAddress1,(new BN(2000000000).mul(oneether)), { from:ownerAddress })
+                expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal((new BN(2000000000).mul(oneether)));
+            })
+
+            it("User tries to trade befor sale start time", async function () {
+                let _time = await time.latestBlock();
+                await this.astra.setStartBlock((parseInt(_time)+10), { from:ownerAddress });
+                await expectRevert(this.astra.transfer(userAddress1,(new BN(2000000000000).mul(oneether)), { from:ownerAddress }),"Token not available for trade");
+            })
+
+            it("Non admin tries to set pair address", async function () {
+                await expectRevert(this.astra.setPairAddress(userAddress1, { from:userAddress1 }),"Ownable: caller is not the owner");
+            })
+            it("Non admin tries to set start time", async function () {
+                await expectRevert(this.astra.setStartBlock(10, { from:userAddress1 }),"Ownable: caller is not the owner");
+            })
+            it("Non admin tries to set limit time", async function () {
+                await expectRevert(this.astra.setSellLimitTime(10, { from:userAddress1 }),"Ownable: caller is not the owner");
+            })
+            it("Admin tries to set pair address again", async function () {
+                await expectRevert(this.astra.setPairAddress(userAddress1, { from:ownerAddress }),"Pair already addded");
+            })
+
+        })
 
         describe("Transfer functionality ", function () {
             beforeEach(async function () {
-                await this.astra.setTransferHandler(this.handler.address, { from: ownerAddress });
             });
 
             it("Tranfer from Account 1 to Account 2", async function () {
                 await this.astra.transfer(userAddress1, (new BN(50000).mul(oneether)), { from: ownerAddress })
-                expect(await this.astra.balanceOf(ownerAddress)).to.be.bignumber.equal((new BN(999950000).mul(oneether)));
+                expect(await this.astra.balanceOf(ownerAddress)).to.be.bignumber.equal((new BN(99999999950000).mul(oneether)));
             })
             it("Account 1 balance should be increased", async function () {
                 await this.astra.transfer(userAddress1, (new BN(50000).mul(oneether)), { from: ownerAddress })
@@ -166,7 +163,6 @@ describe('Initializing', function () {
         })
         describe("Transfer from", function () {
             beforeEach(async function () {
-                await this.astra.setTransferHandler(this.handler.address, { from: ownerAddress });
             });
             it("WithOut Approve", async function () {
                 await expectRevert(this.astra.transferFrom(ownerAddress, userAddress1,1000,{from:ownerAddress}),"ERC20: transfer amount exceeds allowance");
@@ -174,7 +170,7 @@ describe('Initializing', function () {
             it("Tranfer from Account 1 to Account 2", async function () {
                 await this.astra.approve(userAddress1, (new BN(50000).mul(oneether)), { from: ownerAddress });
                 await this.astra.transferFrom(ownerAddress, userAddress1, (new BN(50000).mul(oneether)), { from: userAddress1 })
-                expect(await this.astra.balanceOf(ownerAddress)).to.be.bignumber.equal((new BN(999950000).mul(oneether)));
+                expect(await this.astra.balanceOf(ownerAddress)).to.be.bignumber.equal((new BN(99999999950000).mul(oneether)));
             })
             it("Account 1 balance should be increased", async function () {
                 await this.astra.approve(userAddress1, (new BN(50000).mul(oneether)), { from: ownerAddress });
@@ -199,7 +195,6 @@ describe('Initializing', function () {
 
         describe("Approve/Allowance", function () {
             beforeEach(async function () {
-                await this.astra.setTransferHandler(this.handler.address, { from: ownerAddress });
             });
             it("Initial allowance will be 0", async function () {
                 expect(await this.astra.allowance(ownerAddress, userAddress2)).to.be.bignumber.equal(new BN(0));
@@ -243,21 +238,11 @@ describe('Initializing', function () {
 
         describe("Minting", function () {
             it("Without Minter", async function () {
-                await expectRevert(this.astra.mintNewTokens(userAddress2, 100000000000), "Call must come from Timelock");
-            });
-
-            it("Set minter without owner", async function () {
-                await expectRevert(this.astra.setMinter(userAddress2, {from:userAddress2}), "Ownable: caller is not the owner");
-            });
-
-            it("Set minter with owner", async function () {
-                await this.astra.setMinter(userAddress2, {from:ownerAddress});
-                expect(await this.astra.minter(userAddress2)).to.be.equal(true);
+                await expectRevert(this.astra.mint(userAddress2, 100000000000), "Ownable: caller is not the owner");
             });
 
             it("Mint new token from minter", async function () {
-                await this.astra.setMinter(userAddress2, {from:ownerAddress});
-                await this.astra.mintNewTokens(userAddress2, 1000000, {from:userAddress2});
+                await this.astra.mint(userAddress2, 1000000, {from:ownerAddress});
 
                 expect(await this.astra.balanceOf(userAddress2)).to.be.bignumber.equal(new BN(1000000));
             });
@@ -265,7 +250,6 @@ describe('Initializing', function () {
 
         describe("Burn", function () {
             beforeEach(async function () {
-                await this.astra.setTransferHandler(this.handler.address, { from: ownerAddress });
             });
             it("Burn with insufficient amount", async function () {
                 await expectRevert(this.astra.burn(1000000000, {from:userAddress2}), "ERC20: burn amount exceeds balance");
@@ -279,16 +263,6 @@ describe('Initializing', function () {
             });
         })
 
-        describe("Set Transfer Handler address", function () {
-            it("Set Transfer Handler without owner", async function () {
-                await expectRevert(this.astra.setTransferHandler(userAddress2, {from:userAddress2}), "Ownable: caller is not the owner");
-            });
-
-            it("Set TransferHandler with owner", async function () {
-                await this.astra.setTransferHandler(userAddress2, {from:ownerAddress});
-                expect(await this.astra.transferHandler()).to.be.equal(userAddress2);
-            });
-        })
     })
 
 })

@@ -8,13 +8,12 @@ const MAX_DEPLOYED_BYTECODE_SIZE = 24576;
 const Astrsample = contract.fromArtifact('Token');
 const Timelock = contract.fromArtifact('TimelockMock');
 const Governance = contract.fromArtifact('GovernorAlphaMock');
-const TransferHandler = contract.fromArtifact('MockTransferHandler');
 // const TopHolders = contract.fromArtifact('MockTopHolder');
 const MasterChef = contract.fromArtifact('MasterChef');
 const TestERC20 = contract.fromArtifact('TESTERC20');
 const decimal = new BN(18);
 const oneether = (new BN(10)).pow(decimal);
-const totalSupply = (new BN(100000)).mul(oneether)
+const totalSupply = (new BN(100000000000000)).mul(oneether)
 
 const {
     encodeParameters
@@ -54,28 +53,18 @@ describe('Governance', function () {
         await this.govern.initialize(this.timelock.address,this.astra.address,this.chef.address,{from: ownerAddress, gas: 8000000});
         await this.chef.setDaoAddress(this.govern.address, { from: ownerAddress });
         // console.log("Governance address ",this.govern.address);
-        this.transferHandler = await TransferHandler.new(this.astra.address,{from: ownerAddress, gas: 8000000}); 
-        // console.log("Transfer Handler ",this.transferHandler.address);     
     });
     describe("Configuring Astra contract", function(){
          beforeEach(async function () {
-            await this.astra.setTransferHandler(this.transferHandler.address,{from:ownerAddress});
             const transferValue = (new BN(100)).mul(oneether);
             await this.astra.transfer(userAddress1, transferValue, { from: ownerAddress })
-            await this.astra.setMinter(ownerAddress,{from:ownerAddress});
             var amount= (new BN(30)).mul(oneether);
-            await this.astra.mintNewTokens(userAddress1,amount,{from:ownerAddress});
+            await this.astra.mint(userAddress1,amount,{from:ownerAddress});
             await this.timelock.setPendingAdmin(this.govern.address,{from:ownerAddress});
             await this.govern._acceptAdmin({from:ownerAddress});
-            await this.astra.mintNewTokens(userAddress2,amount,{from:ownerAddress});
+            await this.astra.mint(userAddress2,amount,{from:ownerAddress});
           })
           describe("Check configuration of contracts ",function(){
-            it("Transfer handler address updated successfully",async function(){
-                expect(await this.astra.transferHandler()).to.be.equal(this.transferHandler.address);
-            });
-            it("Minter updated successfully",async function(){ 
-                expect(await this.astra.minter(ownerAddress)).to.be.equal(true);
-              });
               it("New tokens minted successfully",async function(){   
                 expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal((new BN(130)).mul(oneether));
               });

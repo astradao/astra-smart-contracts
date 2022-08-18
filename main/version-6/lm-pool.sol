@@ -1,14 +1,11 @@
+// SPDX-License-Identifier: MIT
 pragma solidity 0.6.12;
 
-import "./common/SafeMath.sol";
-import "./common/IERC20.sol";
-import "./common/ERC20.sol";
-import "./common/SafeERC20.sol";
-import "./upgrade/Ownable.sol";
-import "./upgrade/reetrancyupgradable.sol";
-import "./common/EnumerableSet.sol";
-import "./common/Context.sol";
-import "./common/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/math/SafeMathUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/SafeERC20Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/Initializable.sol";
 
 interface Chef {
     function ASTRPoolId() external view returns (uint256);
@@ -23,16 +20,23 @@ interface Chef {
         external
         view
         returns (uint256);
+
+    function totalPools()
+        external
+        pure
+        returns (uint256);
 }
 
-contract LmPool is Ownable, ReentrancyGuardUpgradeable {
-    using SafeMath for uint256;
-    using SafeERC20 for IERC20;
+contract LmPool is
+    Initializable,
+    OwnableUpgradeable
+{
+    using SafeMathUpgradeable for uint256;
+    using SafeERC20Upgradeable for IERC20Upgradeable;
 
     // Info of each user.
     struct UserInfo {
         uint256 amount; // How many LP tokens the user has provided.
-        uint256 rewardDebt;
         bool cooldown;
         uint256 timestamp;
         uint256 totalUserBaseMul;
@@ -45,17 +49,16 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
     }
 
     struct PoolInfo {
-        IERC20 lpToken; // Address of LP token contract.
+        IERC20Upgradeable lpToken; // Address of LP token contract.
         uint256 lastRewardBlock; // Last block number that ASTRs distribution occurs.
         uint256 totalBaseMultiplier; // Total rm count of all user
+        uint256 totalAmount; // Total amount for Pool
     }
 
     // The ASTR TOKEN!
     address public ASTR;
     // Chef contract address
     address public chefaddr;
-    // Dev address.
-    address public devaddr;
     // Block number when bonus ASTR period ends.
     uint256 public bonusEndBlock;
     // ASTR tokens created per block.
@@ -63,19 +66,18 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
     // Bonus muliplier for early ASTR makers.
     uint256 public constant BONUS_MULTIPLIER = 1; //no Bonus
     // Pool lptokens info
-    mapping(IERC20 => bool) public lpTokensStatus;
+    mapping(IERC20Upgradeable => bool) public lpTokensStatus;
     // Info of each pool.
     PoolInfo[] public poolInfo;
     // Info of each user that stakes LP tokens.
     mapping(uint256 => mapping(address => UserInfo)) public userInfo;
-    // Total allocation poitns. Must be the sum of all allocation points in all pools.
-    uint256 public totalAllocPoint;
     // The block number when ASTR mining starts.
     uint256 public startBlock;
-    // The TimeLock Address!
-    address public timelock;
     // The vault list
     mapping(uint256 => bool) public vaultList;
+
+    // Total users in pool
+    uint256 public totalUsersPool;
 
     //staking info structure
     struct StakeInfo {
@@ -90,34 +92,34 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
     mapping(uint256 => mapping(address => uint256)) private userStakingTrack;
     mapping(uint256 => mapping(address => mapping(uint256 => StakeInfo)))
         public stakeInfo;
-    //mapping cooldown period on Withdraw
-    mapping(uint256 => mapping(address => uint256)) public coolDownStart;
     //staking variables
-    uint256 private dayseconds;
+    uint256 private constant dayseconds = 86400;
     mapping(uint256 => address[]) public userAddressesInPool;
-    enum RewardType {INDIVIDUAL, FLAT, TVL_ADJUSTED}
-    uint256 private ABP;
-
-    //highest staked users
-    struct HighestAstaStaker {
-        uint256 deposited;
-        address addr;
+    enum RewardType {
+        INDIVIDUAL,
+        FLAT,
+        TVL_ADJUSTED
     }
-
-    mapping(uint256 => HighestAstaStaker[]) public highestStakerInPool;
 
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
-    event EmergencyWithdraw(
+    event DepositStateUpdate(
         address indexed user,
         uint256 indexed pid,
-        uint256 amount
+        bool state,
+        uint256 depositID
+    );
+    event AddPool(address indexed tokenAddress);
+    event WithdrawReward(
+        address indexed user,
+        uint256 indexed pid,
+        uint256 amount,
+        bool stake
     );
 
     /**
     @notice This function is used for initializing the contract with sort of parameter
     @param _astr : astra contract address
-    @param _devaddr : dev address or owner address 
     @param _ASTRPerBlock : ASTR rewards per block
     @param _startBlock : start block number for starting rewars distribution
     @param _bonusEndBlock : end block number for ending reward distribution
@@ -127,22 +129,17 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
     */
     function initialize(
         address _astr,
-        address _devaddr,
         uint256 _ASTRPerBlock,
         uint256 _startBlock,
         uint256 _bonusEndBlock
     ) external initializer {
-        require(_astr != address(0),"Zero Address");
-        require(_devaddr != address(0),"Zero Address");
-        Ownable.init(_devaddr);
-        ReentrancyGuardUpgradeable.__ReentrancyGuard_init();
+        require(_astr != address(0), "Zero Address");
+        __Ownable_init();
         ASTR = _astr;
-        devaddr = _devaddr;
         ASTRPerBlock = _ASTRPerBlock;
         bonusEndBlock = _bonusEndBlock;
         startBlock = _startBlock;
-        dayseconds = 86400;
-        ABP = 6500;
+        totalUsersPool = 99;
     }
 
     /**
@@ -154,28 +151,43 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
     }
 
     /**
+    @notice Update the maximum users supported in a pool.
+    @param _totalUsersPool : new maximum number of users supported in a pool.
+    @dev    This function definition is marked "external" because this fuction is called only from outside the contract.
+    */
+    function updateMaximumUsersPool(uint256 _totalUsersPool)
+        external
+        onlyOwner
+    {
+        totalUsersPool = _totalUsersPool;
+    }
+
+    /**
     @notice Add a new lp to the pool. Can only be called by the owner.
     @param _lpToken : iToken or astra contract address
     @dev    this function definition is marked "external" because this fuction is called only from outside the contract.
     */
-    function add(IERC20 _lpToken) external onlyOwner {
-        require(address(_lpToken) != address(0),"Zero Address");
-        require(lpTokensStatus[_lpToken] != true, "LP token already added");
-        // require(_msgSender() == owner() || _msgSender() == address(timelock), "Can only be called by the owner/timelock");
+    function add(IERC20Upgradeable _lpToken) external onlyOwner {
+        require(address(_lpToken) != address(0), "Zero Address");
+        require(Chef(chefaddr).totalPools() > poolInfo.length, "Maximum pool limit reached");
         // Here if the current block number is greater than start block then the lastRewardBlock will be current block
         // otherwise it will the same as start block.
-        uint256 lastRewardBlock =
-            block.number > startBlock ? block.number : startBlock;
-            // Pushing the pool info object after setting the all neccessary values.
+        uint256 lastRewardBlock = block.number > startBlock
+            ? block.number
+            : startBlock;
+        // Pushing the pool info object after setting the all neccessary values.
         poolInfo.push(
             PoolInfo({
                 lpToken: _lpToken,
                 lastRewardBlock: lastRewardBlock,
-                totalBaseMultiplier: 0
+                totalBaseMultiplier: 0,
+                totalAmount: 0
             })
         );
         // Setting the lp token status true becuase pool is active.
         lpTokensStatus[_lpToken] = true;
+
+        emit AddPool(address(_lpToken));
     }
 
     /**
@@ -193,18 +205,8 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
     @dev    this function definition is marked "external" because this fuction is called only from outside the contract.
     */
     function setChefAddress(address _chefaddr) external onlyOwner {
-        require(_chefaddr != address(0),"Zero Address");
+        require(_chefaddr != address(0), "Zero Address");
         chefaddr = _chefaddr;
-    }
-
-    /**
-    @notice Set timelock address. Can only be called by the owner.
-    @param _timeLock : timelock contract address
-    @dev    this function definition is marked "external" because this fuction is called only from outside the contract.
-    */
-    function setTimeLockAddress(address _timeLock) external onlyOwner {
-        require(_timeLock != address(0), "Zero Address");
-        timelock = _timeLock;
     }
 
     /**
@@ -260,7 +262,7 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
         uint256 _pid,
         uint256 _amount,
         uint256 vault
-    ) external nonReentrant{
+    ) external {
         require(vaultList[vault] == true, "no vault");
         PoolInfo storage pool = poolInfo[_pid];
         updateBlockReward(_pid);
@@ -273,6 +275,7 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
                 _amount
             );
             user.amount = user.amount.add(_amount);
+            pool.totalAmount = pool.totalAmount.add(_amount);
         }
         // Updating staking score structure after staking the tokens
         userStakingTrack[_pid][msg.sender] = userStakingTrack[_pid][msg.sender]
@@ -303,8 +306,6 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
     */
     function withdraw(uint256 _pid, bool _withStake) external {
         UserInfo storage user = userInfo[_pid][msg.sender];
-        uint256 _amount = viewEligibleAmount(_pid, msg.sender);
-        require(_amount > 0, "withdraw: not good");
         //Instead of transferring to a standard staking vault, Astra tokens can be locked (meaning that staker forfeits the right to unstake them for a fixed period of time). There are following lockups vaults: 6,9 and 12 months.
         if (user.cooldown == false) {
             user.cooldown = true;
@@ -325,11 +326,6 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
                     block.timestamp >=
                         user.cooldowntimestamp.add(dayseconds.mul(7)),
                     "withdraw: cooldown period"
-                );
-                require(
-                    block.timestamp <=
-                        user.cooldowntimestamp.add(dayseconds.mul(8)),
-                    "withdraw: open window"
                 );
                 // Calling withdraw function after all the validation like cooldown period, eligible amount etc.
                 _withdraw(_pid, _withStake);
@@ -353,6 +349,7 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
         // Calling the function to check the eligible amount and update accordingly
         uint256 _amount = checkEligibleAmount(_pid, msg.sender, true);
         user.amount = user.amount.sub(_amount);
+        pool.totalAmount = pool.totalAmount.sub(_amount);
         pool.lpToken.safeTransfer(address(msg.sender), _amount);
         //update user cooldown status
         user.cooldown = false;
@@ -370,7 +367,7 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
     definition is marked "public" because this fuction is called from outside and inside the contract.
     */
     function viewEligibleAmount(uint256 _pid, address _user)
-        public
+        external
         view
         returns (uint256)
     {
@@ -386,9 +383,10 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
             if (stkInfo.deposit == true) {
                 uint256 mintsec = 86400;
                 uint256 vaultdays = stkInfo.vault.mul(30);
-                uint256 timeaftervaultmonth =
-                    stkInfo.timestamp.add(vaultdays.mul(mintsec));
-                    // Checking if the duration of vault month is passed.
+                uint256 timeaftervaultmonth = stkInfo.timestamp.add(
+                    vaultdays.mul(mintsec)
+                );
+                // Checking if the duration of vault month is passed.
                 if (block.timestamp >= timeaftervaultmonth) {
                     eligibleAmount = eligibleAmount.add(stkInfo.amount);
                 }
@@ -424,48 +422,20 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
             if (stkInfo.deposit == true) {
                 uint256 mintsec = 86400;
                 uint256 vaultdays = stkInfo.vault.mul(30);
-                uint256 timeaftervaultmonth =
-                    stkInfo.timestamp.add(vaultdays.mul(mintsec));
+                uint256 timeaftervaultmonth = stkInfo.timestamp.add(
+                    vaultdays.mul(mintsec)
+                );
                 // Checking if the duration of vault month is passed.
                 if (block.timestamp >= timeaftervaultmonth) {
                     eligibleAmount = eligibleAmount.add(stkInfo.amount);
                     if (_withUpdate) {
                         stkInfo.deposit = false;
+                        emit DepositStateUpdate(msg.sender, _pid, false, i);
                     }
                 }
             }
         }
         return eligibleAmount;
-    }
-
-    // Withdraw without caring about rewards. EMERGENCY ONLY.
-    function emergencyWithdraw(uint256 _pid) external {
-        PoolInfo storage pool = poolInfo[_pid];
-        UserInfo storage user = userInfo[_pid][msg.sender];
-        uint256 _amount = user.amount;
-        pool.lpToken.safeTransfer(address(msg.sender), _amount);
-        user.amount = 0;
-        user.totalReward = 0;
-        emit EmergencyWithdraw(msg.sender, _pid, _amount);
-    }
-
-    /**
-    @notice Withdraw ASTR Tokens from MasterChef address.
-    @param recipient : recipient address
-    @param amount : amount
-    @dev Description :
-    Withdraw ASTR Tokens from Lm Pool address. This function definition is marked "external" because this fuction
-    is called only from outside the contract.
-    */
-    function emergencyWithdrawASTR(address recipient, uint256 amount)
-        external
-        onlyOwner
-    {
-        require(
-            amount > 0 && recipient != address(0),
-            "amount and recipient address can not be 0"
-        );
-        safeASTRTransfer(recipient, amount);
     }
 
     /**
@@ -477,18 +447,12 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
     because this fuction is called only from inside the contract.
     */
     function safeASTRTransfer(address _to, uint256 _amount) internal {
-        uint256 ASTRBal = IERC20(ASTR).balanceOf(address(this));
+        uint256 ASTRBal = IERC20Upgradeable(ASTR).balanceOf(address(this));
         require(
             !(_amount > ASTRBal),
             "Insufficient amount on lm pool contract"
         );
-        IERC20(ASTR).safeTransfer(_to, _amount);
-    }
-
-    // Update dev address by the previous dev.
-    function dev(address _devaddr) external {
-        require(msg.sender == devaddr, "dev: wut?");
-        devaddr = _devaddr;
+        IERC20Upgradeable(ASTR).safeTransfer(_to, _amount);
     }
 
     /**
@@ -501,6 +465,10 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
     function addUserAddress(uint256 _pid) private {
         address[] storage adds = userAddressesInPool[_pid];
         if (userStakingTrack[_pid][msg.sender] == 0) {
+            require(
+                adds.length < totalUsersPool,
+                "Pool maximum number limit reached"
+            );
             adds.push(msg.sender);
         }
     }
@@ -559,8 +527,9 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
         // with actual distributed reward.
         for (uint256 i = 0; i < adds.length; i++) {
             UserInfo storage user = userInfo[_pid][adds[i]];
-            uint256 sharePercentage =
-                user.totalUserBaseMul.mul(10000).div(poolBaseMul);
+            uint256 sharePercentage = user.totalUserBaseMul.mul(10000).div(
+                poolBaseMul
+            );
             user.totalReward = user.totalReward.add(
                 (_amount.mul(sharePercentage)).div(10000)
             );
@@ -599,8 +568,9 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
             // variable with actual distributed reward.
             for (uint256 i = 0; i < adds.length; i++) {
                 UserInfo storage user = userInfo[pid][adds[i]];
-                uint256 sharePercentage =
-                    user.totalUserBaseMul.mul(10000).div(allPoolBaseMul);
+                uint256 sharePercentage = user.totalUserBaseMul.mul(10000).div(
+                    allPoolBaseMul
+                );
                 user.totalReward = user.totalReward.add(
                     (_amount.mul(sharePercentage)).div(10000)
                 );
@@ -623,13 +593,13 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
         // Applied the loop for calculating the TVL(total value locked) and updating that in totalTvl variable.
         for (uint256 pid = 0; pid < poolInfo.length; ++pid) {
             PoolInfo storage pool = poolInfo[pid];
-            uint256 tvl = pool.lpToken.balanceOf(address(this));
+            uint256 tvl = pool.totalAmount;
             totalTvl = totalTvl.add(tvl);
         }
         // Applied the loop for calculating the reward share for each pool and the distribute the share with all users.
         for (uint256 pid = 0; pid < poolInfo.length; ++pid) {
             PoolInfo storage pool = poolInfo[pid];
-            uint256 tvl = pool.lpToken.balanceOf(address(this));
+            uint256 tvl = pool.totalAmount;
             uint256 poolRewardShare = tvl.mul(10000).div(totalTvl);
             uint256 reward = (_amount.mul(poolRewardShare)).div(10000);
             // After getting the pool reward share then it will same as individual reward.
@@ -660,7 +630,7 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
             PoolEndBlock = bonusEndBlock;
         }
         // Here we are checking the balance of chef contract in behalf of itokens/astra token.
-        uint256 lpSupply = pool.lpToken.balanceOf(address(this));
+        uint256 lpSupply = pool.totalAmount;
         if (lpSupply == 0) {
             // If it is 0 the we just update the last Reward block value in pool and return without doing anything.
             pool.lastRewardBlock = PoolEndBlock;
@@ -709,8 +679,9 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
         uint256 blockReward,
         uint256 totalPoolBaseMul
     ) private {
-        uint256 userBaseMul =
-            currentUser.amount.mul(getRewardMultiplier(msg.sender));
+        uint256 userBaseMul = currentUser.amount.mul(
+            getRewardMultiplier(msg.sender)
+        );
         uint256 totalBlockReward = blockReward.add(currentUser.preBlockReward);
         // Calculating the shared percentage for reward.
         uint256 sharePercentage = userBaseMul.mul(10000).div(totalPoolBaseMul);
@@ -729,7 +700,7 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
         PoolInfo memory pool = poolInfo[_pid];
         uint256 totalReward = currentUser.totalReward;
         // Here we are checking the balance of chef contract in behalf of itokens/astra token.
-        uint256 lpSupply = pool.lpToken.balanceOf(address(this));
+        uint256 lpSupply = pool.totalAmount;
         if (lpSupply == 0) {
             // If it is 0 the we just update the last Reward block value in pool and return total reward of user.
             pool.lastRewardBlock = block.number;
@@ -761,8 +732,9 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
             uint256 mul = getRewardMultiplier(adds[i]);
             totalPoolBaseMul = totalPoolBaseMul.add(user.amount.mul(mul));
         }
-        uint256 userBaseMul =
-            currentUser.amount.mul(getRewardMultiplier(msg.sender));
+        uint256 userBaseMul = currentUser.amount.mul(
+            getRewardMultiplier(msg.sender)
+        );
         uint256 totalBlockReward = blockReward.add(currentUser.preBlockReward);
         // Calculting the share percentage for the currenct user.
         uint256 sharePercentage = userBaseMul.mul(10000).div(totalPoolBaseMul);
@@ -772,7 +744,7 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
             );
     }
 
-    function distributeExitFeeShare(uint256 _amount) external {
+    function distributeExitFeeShare(uint256 _amount) external onlyOwner {
         require(_amount > 0, "Amount should not be zero");
         distributeIndividualReward(Chef(chefaddr).ASTRPoolId(), _amount);
     }
@@ -786,7 +758,9 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
         or without staking the ASTR token. If user wants to claim 100% then he needs to stake the ASTR
         to ASTR pool. Otherwise some ASTR amount would be deducted as a fee.
     */
-    function withdrawASTRReward(uint256 _pid, bool _withStake) public nonReentrant{
+    function withdrawASTRReward(uint256 _pid, bool _withStake)
+        public
+    {
         // Update the block reward for the current user.
         updateBlockReward(_pid);
         UserInfo storage currentUser = userInfo[_pid][msg.sender];
@@ -796,11 +770,13 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
             // Called this function for staking the ASTRA rewards in astra pool.
             stakeASTRReward(Chef(chefaddr).ASTRPoolId(), _amount);
             updateClaimedReward(currentUser, _amount);
+            emit WithdrawReward(msg.sender, _pid, _amount, true);
         } else {
             // Else we will slash some fee and send the amount to user account.
             uint256 dayInSecond = 86400;
-            uint256 dayCount =
-                (block.timestamp.sub(currentUser.timestamp)).div(dayInSecond);
+            uint256 dayCount = (block.timestamp.sub(currentUser.timestamp)).div(
+                dayInSecond
+            );
             if (dayCount >= 90) {
                 dayCount = 90;
             }
@@ -820,11 +796,7 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
         the amount will be staked in ASTR pool.
     */
     function stakeASTRReward(uint256 _pid, uint256 _amount) private {
-        Chef(chefaddr).stakeASTRReward(
-            msg.sender,
-            _pid,
-            _amount
-        );
+        Chef(chefaddr).stakeASTRReward(msg.sender, _pid, _amount);
     }
 
     /**
@@ -852,6 +824,7 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
         uint256 claimableReward = totalReward.sub(fee);
         if (claimableReward > 0) {
             safeASTRTransfer(msg.sender, claimableReward);
+            emit WithdrawReward(msg.sender, _pid, claimableReward, false);
             currentUser.totalReward = 0;
         }
         // Deducted fee would be distribute as reward to the same pool user as individual reward
@@ -868,15 +841,21 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
     This function is called from withdrawASTRReward function for manegaing the total claimed amount and cliamed amount 
     in one day. This function definition is marked "private" because this fuction is called only from inside the contract.
     */
-    function updateClaimedReward(UserInfo storage currentUser, uint256 _amount) private {
+    function updateClaimedReward(UserInfo storage currentUser, uint256 _amount)
+        private
+    {
         // Adding the amount in total claimed reward.
-        currentUser.totalClaimedReward = currentUser.totalClaimedReward.add(_amount);
+        currentUser.totalClaimedReward = currentUser.totalClaimedReward.add(
+            _amount
+        );
         // Calculating the difference between the current and last claimed day.
-        uint256 day = block.timestamp.sub(currentUser.claimedTimestamp).div(dayseconds);
-        if(day == 0) {
+        uint256 day = block.timestamp.sub(currentUser.claimedTimestamp).div(
+            dayseconds
+        );
+        if (day == 0) {
             // If day is 0 then user is claiming the reward on the current day.
             currentUser.claimedToday = currentUser.claimedToday.add(_amount);
-        }else{
+        } else {
             // Otherwise we update the today date in claimed timestamp and amount in claimed amount.
             currentUser.claimedToday = _amount;
             uint256 todayDaySeconds = block.timestamp % dayseconds;
@@ -894,12 +873,14 @@ contract LmPool is Ownable, ReentrancyGuardUpgradeable {
     function getTodayReward(uint256 _pid) external view returns (uint256) {
         UserInfo memory currentUser = userInfo[_pid][msg.sender];
         // Calculating the difference between the current and last claimed day.
-        uint256 day = block.timestamp.sub(currentUser.claimedTimestamp).div(dayseconds);
+        uint256 day = block.timestamp.sub(currentUser.claimedTimestamp).div(
+            dayseconds
+        );
         uint256 claimedToday;
-        if(day == 0) {
+        if (day == 0) {
             // If diffrence is 0 then it returns the claimedToday value from UserInfo object
             claimedToday = currentUser.claimedToday;
-        }else{
+        } else {
             // Otherwise it returns 0 because the claimed value celongs to other previous day not for today.
             claimedToday = 0;
         }

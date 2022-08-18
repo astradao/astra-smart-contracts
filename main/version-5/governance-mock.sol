@@ -72,7 +72,7 @@ contract GovernorAlphaMock is Initializable {
     
     uint public lastProposalTimeIntervalSec;
 
-    uint256 public proposalTokens = 500 * 10**18;
+    uint256 public proposalTokens = 50000000 * 10**18;
 
     uint256 public lastProposal;
 
@@ -299,7 +299,7 @@ contract GovernorAlphaMock is Initializable {
      * @param calldatas Paramete that will be passed in function paramt in bytes format.
      * @param description Description about proposal.
      * @param _fundametalChanges Check if proposal involved fundamental changes or not.
-	 * @dev Create new proposal. Her only top stakers can create proposal and Need to submit 500 Astra tokens to create proposal
+	 * @dev Create new proposal. Her only top stakers can create proposal and Need to submit 50000000 Astra tokens to create proposal
      */
     function propose(address[] memory targets, uint[] memory values, string[] memory signatures, bytes[] memory calldatas, string memory description, bool _fundametalChanges) public returns (uint) {
         // Check if entered configuration is correct or not.

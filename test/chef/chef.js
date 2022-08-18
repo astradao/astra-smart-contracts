@@ -19,25 +19,27 @@ describe('MasterChef', function () {
         this.lp = await TestERC20.new("LPToken", "LP",18, { from: ownerAddress, gas: 8000000 });
         this.lp2 = await TestERC20.new("LPToken2", "LP2",18, { from: ownerAddress, gas: 8000000 });
         this.chef = await MasterChef.new({ from: ownerAddress, gas: 8000000 });
-        await this.chef.initialize(this.astra.address, ownerAddress, "1000", "0", "10000", { from: ownerAddress, gas: 8000000 });
+        await this.chef.initialize(this.astra.address, "1000", "0", "10000", { from: ownerAddress, gas: 8000000 });
     });
 
     describe('set/update variables', function () {
         it("should set correct state variables", async function () {
             const astr = await this.chef.ASTR();
-            const devaddr = await this.chef.devaddr();
             expect(astr).to.equal(this.astra.address);
-            expect(devaddr).to.equal(ownerAddress);
         })
+        it("Update max pool number", async function () {
+            expect(await this.chef.totalPools()).to.bignumber.equal(new BN(99));
+            await this.chef.updateMaximumPool(5, { from: ownerAddress });
+            expect(await this.chef.totalPools()).to.bignumber.equal(new BN(5));
+            await expectRevert(this.chef.updateMaximumPool(6, { from: userAddress1 }), "Ownable: caller is not the owner")
+        });
 
-        it("should allow dev and only dev to update dev", async function () {
-            expect(await this.chef.devaddr()).to.equal(ownerAddress)
-            await expectRevert(this.chef.dev(userAddress1, { from: userAddress1 }), "dev: wut?")
-            await this.chef.dev(userAddress1, { from: ownerAddress })
-            expect(await this.chef.devaddr()).to.equal(userAddress1)
-            await this.chef.dev(ownerAddress, { from: userAddress1 })
-            expect(await this.chef.devaddr()).to.equal(ownerAddress)
-        })
+        it("Should only add upto the limit", async function () {
+            await this.chef.updateMaximumPool(2, { from: ownerAddress });
+            await this.chef.add(this.lp.address, { from: ownerAddress })
+            await this.chef.add(this.lp.address, { from: ownerAddress })
+            expectRevert(this.chef.add(this.lp.address, { from: ownerAddress }), "Maximum pool limit reached")
+        });
 
     });
 
@@ -79,7 +81,7 @@ describe('MasterChef', function () {
     describe("With ERC/LP token added to the field", function () {
         beforeEach(async function () {
             this.chef = await MasterChef.new({ from: ownerAddress, gas: 8000000 });
-            await this.chef.initialize(this.astra.address, ownerAddress, "1000", "0", "10000", { from: ownerAddress, gas: 8000000 });
+            await this.chef.initialize(this.astra.address, "1000", "0", "10000", { from: ownerAddress, gas: 8000000 });
             await this.lp.transfer(userAddress1, "1000", { from: ownerAddress })
             await this.lp.transfer(userAddress2, "1000", { from: ownerAddress })
             await this.lp.transfer(userAddress3, "1000", { from: ownerAddress })
@@ -89,27 +91,16 @@ describe('MasterChef', function () {
             await this.lp2.transfer(userAddress3, "1000", { from: ownerAddress })
         })
 
-        it("should allow emergency withdraw", async function () {
-            // 100 per block farming rate starting at block 100 with bonus until block 1000
-            await this.chef.add(this.lp.address, { from: ownerAddress })
-            await this.chef.addVault("0", { from: ownerAddress })
-            await this.lp.approve(this.chef.address, "1000", { from: userAddress2 })
-            await this.chef.deposit(0, "100", "0", { from: userAddress2 })
-            expect(await this.lp.balanceOf(userAddress2)).to.be.bignumber.equal(new BN(900));
-            await this.chef.emergencyWithdraw(0, { from: userAddress2 })
-            expect(await this.lp.balanceOf(userAddress2)).to.be.bignumber.equal(new BN(1000));
-        })
-
         it("set timelock address", async function () {
             await expectRevert(this.chef.setTimeLockAddress(userAddress1, { from: userAddress1 }), "Ownable: caller is not the owner")
             await this.chef.setTimeLockAddress(userAddress1, { from: ownerAddress });
             expect(await this.chef.timelock()).to.equal(userAddress1)
         })
 
-        it("Call initialize method multiple time", async function () {
+        it("Call initialize method multiple await time", async function () {
             this.chef = await MasterChef.new({ from: ownerAddress, gas: 8000000 });
-            await this.chef.initialize(this.astra.address, ownerAddress, "100", "700", "1000", { from: ownerAddress, gas: 8000000 });
-            await expectRevert(this.chef.initialize(this.astra.address, ownerAddress, "100", "700", "1000", { from: ownerAddress, gas: 8000000 }), "Contract instance has already been initialized");
+            await this.chef.initialize(this.astra.address, "100", "700", "1000", { from: ownerAddress, gas: 8000000 });
+            await expectRevert(this.chef.initialize(this.astra.address, "100", "700", "1000", { from: ownerAddress, gas: 8000000 }), "Initializable: contract is already initialized");
         })
 
         it("Transfer Ownership", async function () {
@@ -117,11 +108,6 @@ describe('MasterChef', function () {
             await this.chef.transferOwnership(userAddress1, { from: ownerAddress, gas: 8000000 });
             expect(await this.chef.owner()).to.equal(userAddress1)
             await expectRevert(this.chef.setTimeLockAddress(userAddress2, { from: ownerAddress }), "Ownable: caller is not the owner")
-        })
-
-        it("Add lp token more than one time", async function () {
-            await this.chef.add(this.lp.address, { from: ownerAddress })
-            await expectRevert(this.chef.add(this.lp.address, { from: ownerAddress }), "LP token already added");
         })
 
         it("calculate the staking score for same day staked", async function () {
@@ -139,12 +125,12 @@ describe('MasterChef', function () {
             await this.chef.deposit(0, "1000", 0, { from: userAddress2 })
             await this.astra.transfer(this.chef.address, "100000", { from: ownerAddress });
             //to start cooldown
-            let beforeTimeincrease = await time.latestBlock();
+            let beforeTimeincrease = await await time.latestBlock();
             console.log("beforeTimeincrease ",parseInt(beforeTimeincrease));
             await this.chef.withdraw(0, false, { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801)
-            let afterTimeincrease = await time.latestBlock();
+            //await time after 7 DAYS
+            await time.increase(604801)
+            let afterTimeincrease = await await time.latestBlock();
             console.log("afterTimeincrease ",parseInt(afterTimeincrease));
             await this.chef.withdraw(0, false, { from: userAddress2 })
             expect(await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(0));
@@ -156,8 +142,8 @@ describe('MasterChef', function () {
             await this.chef.add(this.lp.address, { from: ownerAddress })
             await this.lp.approve(this.chef.address, "1000", { from: userAddress2 })
             await this.chef.deposit(0, "1000", 0, { from: userAddress2 })
-            // time to check after 30 days
-            time.increase(2592000);
+            // await time to check after 30 days
+            await time.increase(2592000);
             expect(await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(500));
         })
 
@@ -166,8 +152,8 @@ describe('MasterChef', function () {
             await this.chef.add(this.lp.address, { from: ownerAddress })
             await this.lp.approve(this.chef.address, "1000", { from: userAddress2 })
             await this.chef.deposit(0, "1000", 0, { from: userAddress2 })
-            // time to check after 61 days
-            time.increase(5270400);
+            // await time to check after 61 days
+            await time.increase(5270400);
             expect(await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(1000));
 
         })
@@ -177,8 +163,8 @@ describe('MasterChef', function () {
             await this.chef.addVault("12", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "1000", { from: userAddress2 })
             await this.chef.deposit(0, "1000", 12, { from: userAddress2 })
-            // time to after 1 day
-            time.increase(86401);
+            // await time to after 1 day
+            await time.increase(86401);
             expect(await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(1000));
 
         })
@@ -188,8 +174,8 @@ describe('MasterChef', function () {
             await this.chef.addVault("6", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "1000", { from: userAddress2 })
             await this.chef.deposit(0, "1000", "6", { from: userAddress2 })
-            // time to after 1 day
-            time.increase(86401);
+            // await time to after 1 day
+            await time.increase(86401);
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(33));
         })
@@ -199,19 +185,9 @@ describe('MasterChef', function () {
             await this.chef.addVault("3", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "1000", { from: userAddress2 })
             await this.chef.deposit(0, "1000", "3", { from: userAddress2 })
-            // time to after 1 day
-            time.increase(86401);
+            // await time to after 1 day
+            await time.increase(86401);
             expect(await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(22));
-        })
-
-        it("eligible amount should be greater than 0 for withdrawal", async function () {
-            await this.chef.add(this.lp.address, { from: ownerAddress })
-            await this.chef.addVault("3", { from: ownerAddress })
-            await this.lp.approve(this.chef.address, "1000", { from: userAddress2 })
-            await this.chef.deposit(0, "100", "3", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801)
-            await expectRevert(this.chef.withdraw(0, false, { from: userAddress2 }), "withdraw: not good")
         })
 
         it("Cooldown period", async function () {
@@ -232,11 +208,15 @@ describe('MasterChef', function () {
             await this.chef.deposit(0, "1000", "0", { from: userAddress2 })
             //on first withdra attempt cooldown period start
             await this.chef.withdraw(0, false, { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801)
+            //await time after 7 DAYS
+            await time.increase(604801)
             await this.astra.transfer(this.chef.address, "100000", { from: ownerAddress });
+            expect((await this.chef.poolInfo(0)).totalAmount).to.be.bignumber.equal(new BN(1000))
+
             await this.chef.withdraw(0, false, { from: userAddress2 })
             expect(await this.lp.balanceOf(userAddress2)).to.be.bignumber.equal(new BN(1000))
+            expect((await this.chef.poolInfo(0)).totalAmount).to.be.bignumber.equal(new BN(0))
+
         })
 
         it("withdraw after open window period over", async function () {
@@ -247,8 +227,8 @@ describe('MasterChef', function () {
             //on first withdra attempt cooldown period start
             await this.chef.withdraw(0, false, { from: userAddress2 })
             //on second attempt after open window period over
-            //time after 8 DAYS
-            time.increase(691202)
+            //await time after 8 DAYS
+            await time.increase(691202)
             await this.astra.transfer(this.chef.address, "100000", { from: ownerAddress });
             //now cooldown period is reset
             await this.chef.withdraw(0, false, { from: userAddress2 })
@@ -273,10 +253,10 @@ describe('MasterChef', function () {
             await this.lp.approve(this.chef.address, "1000", { from: userAddress2 })
             await this.chef.deposit(0, "1000", "3", { from: userAddress2 })
             //on first withdra attempt after 3 month
-            time.increase(7776002)
+            await time.increase(7776002)
             await this.chef.withdraw(0, false, { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(7776012)
+            //await time after 7 DAYS
+            await time.increase(7776012)
             await this.astra.transfer(this.chef.address, "100000", { from: ownerAddress });
             expect(this.chef.withdraw(0, false, { from: userAddress2 }), "Insufficient amount on chef contract")
             expect(await this.lp.balanceOf(userAddress2)).to.be.bignumber.equal(new BN(0))
@@ -291,10 +271,10 @@ describe('MasterChef', function () {
             await this.astra.transfer(this.chef.address, "100000", { from: ownerAddress })
             await this.chef.deposit(0, "500", "3", { from: userAddress2 })
             await this.chef.deposit(0, "500", "6", { from: userAddress2 })
-            time.increase(15552001);
+            await time.increase(15552001);
             await this.chef.withdraw(0, false, { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(16156801)
+            //await time after 7 DAYS
+            await time.increase(16156801)
             await this.chef.withdraw(0, false, { from: userAddress2 })
             await expectRevert(this.chef.withdraw(0, false, { from: userAddress2 }), "withdraw: cooldown period")
             expect(await this.lp.balanceOf(userAddress2)).to.be.bignumber.equal(new BN(0))
@@ -325,7 +305,7 @@ describe('MasterChef', function () {
             await this.chef.deposit(0, "300", "6", { from: userAddress2 })
             await this.chef.deposit(0, "500", "9", { from: userAddress2 })
             // After 180 days means 6 months
-            time.increase(86400 * 6 * 30)
+            await time.increase(86400 * 6 * 30)
             expect(await this.lp.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN(1000))
             expect(await this.chef.viewEligibleAmount(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(500))
         })
@@ -341,7 +321,7 @@ describe('MasterChef', function () {
             await this.chef.deposit(0, "300", "6", { from: userAddress2 })
             await this.chef.deposit(0, "500", "9", { from: userAddress2 })
             // After 270 days means 9 months
-            time.increase(86400 * 9 * 30)
+            await time.increase(86400 * 9 * 30)
             expect(await this.lp.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN(1000))
             expect(await this.chef.viewEligibleAmount(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(1000))
         })
@@ -360,7 +340,7 @@ describe('MasterChef', function () {
             expect(await this.chef.viewEligibleAmount(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(200))
             await this.chef.withdraw(0, true, { from: userAddress2 })
             // after 7 days
-            time.increase(604800)
+            await time.increase(604800)
             await this.chef.withdraw(0, true, { from: userAddress2 })
             expect(await this.lp.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN(800))
         })
@@ -377,11 +357,11 @@ describe('MasterChef', function () {
             await this.chef.deposit(0, "500", "9", { from: userAddress2 })
             expect(await this.lp.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN(1000))
             // After 180 days means 6 months
-            time.increase(86400 * 6 * 30)
+            await time.increase(86400 * 6 * 30)
             expect(await this.chef.viewEligibleAmount(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(500))
             await this.chef.withdraw(0, true, { from: userAddress2 })
             // after 7 days
-            time.increase(86400 * 7)
+            await time.increase(86400 * 7)
             await this.chef.withdraw(0, true, { from: userAddress2 })
             expect(await this.lp.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN(500))
         })
@@ -398,11 +378,11 @@ describe('MasterChef', function () {
             await this.chef.deposit(0, "500", "9", { from: userAddress2 })
             expect(await this.lp.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN(1000))
             // After 270 days means 9 months
-            time.increase(86400 * 9 * 30)
+            await time.increase(86400 * 9 * 30)
             expect(await this.chef.viewEligibleAmount(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(1000))
             await this.chef.withdraw(0, true, { from: userAddress2 })
             // after 7 days
-            time.increase(604800)
+            await time.increase(604800)
             await this.chef.withdraw(0, true, { from: userAddress2 })
             expect(await this.lp.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN(0))
         })
@@ -426,8 +406,8 @@ describe('MasterChef', function () {
             await this.chef.addVault("12", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "800000000000000000000000", { from: userAddress2 })
             await this.chef.deposit(0, "800000000000000000000000", "12", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(25));
@@ -438,8 +418,8 @@ describe('MasterChef', function () {
             await this.chef.addVault("12", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "700000000000000000000000", { from: userAddress2 })
             await this.chef.deposit(0, "700000000000000000000000", "12", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(21));
@@ -450,8 +430,8 @@ describe('MasterChef', function () {
             await this.chef.addVault("12", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "200000000000000000000000", { from: userAddress2 })
             await this.chef.deposit(0, "200000000000000000000000", "12", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(20));
@@ -462,8 +442,8 @@ describe('MasterChef', function () {
             await this.chef.addVault("12", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "100000", { from: userAddress2 })
             await this.chef.deposit(0, "100000", "12", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(18));
@@ -474,8 +454,8 @@ describe('MasterChef', function () {
             await this.chef.addVault("9", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "800000000000000000000000", { from: userAddress2 })
             await this.chef.deposit(0, "800000000000000000000000", "9", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(16));
@@ -486,8 +466,8 @@ describe('MasterChef', function () {
             await this.chef.addVault("9", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "700000000000000000000000", { from: userAddress2 })
             await this.chef.deposit(0, "700000000000000000000000", "9", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(16));
@@ -498,8 +478,8 @@ describe('MasterChef', function () {
             await this.chef.addVault("9", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "200000000000000000000000", { from: userAddress2 })
             await this.chef.deposit(0, "200000000000000000000000", "9", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(13));
@@ -510,8 +490,8 @@ describe('MasterChef', function () {
             await this.chef.addVault("9", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "100000", { from: userAddress2 })
             await this.chef.deposit(0, "100000", "9", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(13));
@@ -522,8 +502,8 @@ describe('MasterChef', function () {
             await this.chef.addVault("6", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "800000000000000000000000", { from: userAddress2 })
             await this.chef.deposit(0, "800000000000000000000000", "6", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(13));
@@ -534,8 +514,8 @@ describe('MasterChef', function () {
             await this.chef.addVault("6", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "700000000000000000000000", { from: userAddress2 })
             await this.chef.deposit(0, "700000000000000000000000", "6", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(13));
@@ -546,8 +526,8 @@ describe('MasterChef', function () {
             await this.chef.addVault("6", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "200000000000000000000000", { from: userAddress2 })
             await this.chef.deposit(0, "200000000000000000000000", "6", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(11));
@@ -558,8 +538,8 @@ describe('MasterChef', function () {
             await this.chef.addVault("6", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "100000", { from: userAddress2 })
             await this.chef.deposit(0, "100000", "6", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(11));
@@ -570,8 +550,8 @@ describe('MasterChef', function () {
             await this.chef.addVault("0", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "900000000000000000000000", { from: userAddress2 })
             await this.chef.deposit(0, "900000000000000000000000", "0", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             let data  = await this.chef.stakingScore(0, userAddress2)
@@ -584,8 +564,8 @@ describe('MasterChef', function () {
             await this.chef.addVault("0", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "700000000000000000000000", { from: userAddress2 })
             await this.chef.deposit(0, "700000000000000000000000", "0", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(10));
@@ -596,8 +576,8 @@ describe('MasterChef', function () {
             await this.chef.addVault("0", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "200000000000000000000000", { from: userAddress2 })
             await this.chef.deposit(0, "200000000000000000000000", "0", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(10));
@@ -608,8 +588,8 @@ describe('MasterChef', function () {
             await this.chef.addVault("0", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "10000", { from: userAddress2 })
             await this.chef.deposit(0, "10000", "0", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(10));
@@ -622,8 +602,8 @@ describe('MasterChef', function () {
             await this.lp.approve(this.chef.address, "100000", { from: userAddress2 })
             await this.chef.deposit(0, "10000", "6", { from: userAddress2 })
             await this.chef.deposit(0, "10000", "9", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(12));
@@ -638,8 +618,8 @@ describe('MasterChef', function () {
             await this.chef.deposit(0, "10000", "6", { from: userAddress2 })
             await this.chef.deposit(0, "10000", "9", { from: userAddress2 })
             await this.chef.deposit(0, "10000", "12", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(14));
@@ -654,8 +634,8 @@ describe('MasterChef', function () {
             await this.chef.deposit(0, "50000000000000000000000", "6", { from: userAddress2 })
             await this.chef.deposit(0, "50000000000000000000000", "9", { from: userAddress2 })
             await this.chef.deposit(0, "100000000000000000000000", "12", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(16));
@@ -670,8 +650,8 @@ describe('MasterChef', function () {
             await this.chef.deposit(0, "50000000000000000000000", "6", { from: userAddress2 })
             await this.chef.deposit(0, "50000000000000000000000", "9", { from: userAddress2 })
             await this.chef.deposit(0, "300000000000000000000000", "12", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(17));
@@ -686,8 +666,8 @@ describe('MasterChef', function () {
             await this.chef.deposit(0, "50000000000000000000000", "6", { from: userAddress2 })
             await this.chef.deposit(0, "50000000000000000000000", "9", { from: userAddress2 })
             await this.chef.deposit(0, "800000000000000000000000", "12", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             await this.chef.stakingScore(0, userAddress2, { from: userAddress2 })
             expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(21));
@@ -746,7 +726,7 @@ describe('MasterChef', function () {
             it("only dao contract can distribute individual reward", async function () {
                 await this.chef.deposit(0, "100000000000000000000000", 12, { from: userAddress1 })
                 await this.chef.deposit(0, "300000000000000000000000", 12, { from: userAddress2 })
-                time.increase(86401)
+                await time.increase(86401)
                 expect(await this.chef.getRewardMultiplier(0, userAddress1, { from: userAddress1 })).to.be.bignumber.equal(new BN(20))
                 expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(21))
                 await expectRevert(this.chef.distributeReward(0, 0, "100000000000000000000", { from: userAddress1 }), "Ownable: caller is not the owner")
@@ -755,7 +735,7 @@ describe('MasterChef', function () {
             it("individual reward distribution", async function () {
                 await this.chef.deposit(0, "100000000000000000000000", 12, { from: userAddress1 })
                 await this.chef.deposit(0, "300000000000000000000000", 12, { from: userAddress2 })
-                time.increase(86401)
+                await time.increase(86401)
                 expect(await this.chef.getRewardMultiplier(0, userAddress1, { from: userAddress1 })).to.be.bignumber.equal(new BN(20))
                 expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(21))
                 await this.chef.deposit(1, "100000000000000000000000", 12, { from: userAddress1 })
@@ -770,7 +750,7 @@ describe('MasterChef', function () {
             it("only dao contract can distribute flat reward", async function () {
                 await this.chef.deposit(0, "100000000000000000000000", 12, { from: userAddress1 })
                 await this.chef.deposit(0, "300000000000000000000000", 12, { from: userAddress2 })
-                time.increase(86401)
+                await time.increase(86401)
                 expect(await this.chef.getRewardMultiplier(0, userAddress1, { from: userAddress1 })).to.be.bignumber.equal(new BN(20))
                 expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(21))
                 await expectRevert(this.chef.distributeReward(0, 1, "100000000000000000000", { from: userAddress1 }), "Ownable: caller is not the owner")
@@ -779,7 +759,7 @@ describe('MasterChef', function () {
             it("flat reward distribution", async function () {
                 await this.chef.deposit(0, "100000000000000000000000", 12, { from: userAddress1 })
                 await this.chef.deposit(0, "300000000000000000000000", 12, { from: userAddress2 })
-                time.increase(86401)
+                await time.increase(86401)
                 expect(await this.chef.getRewardMultiplier(0, userAddress1, { from: userAddress1 })).to.be.bignumber.equal(new BN(20))
                 expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(21))
                 await this.chef.deposit(1, "100000000000000000000000", 12, { from: userAddress1 })
@@ -800,7 +780,7 @@ describe('MasterChef', function () {
             it("only dao contract can distribute tvl adjusted reward", async function () {
                 await this.chef.deposit(0, "100000000000000000000000", 12, { from: userAddress1 })
                 await this.chef.deposit(0, "300000000000000000000000", 12, { from: userAddress2 })
-                time.increase(86401)
+                await time.increase(86401)
                 expect(await this.chef.getRewardMultiplier(0, userAddress1, { from: userAddress1 })).to.be.bignumber.equal(new BN(20))
                 expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(21))
                 await expectRevert(this.chef.distributeReward(0, 0, "100000000000000000000", { from: userAddress1 }), "Ownable: caller is not the owner")
@@ -809,7 +789,7 @@ describe('MasterChef', function () {
             it("tvl adjusted reward distribution", async function () {
                 await this.chef.deposit(0, "100000000000000000000000", 12, { from: userAddress1 })
                 await this.chef.deposit(0, "300000000000000000000000", 12, { from: userAddress2 })
-                time.increase(86401)
+                await time.increase(86401)
                 expect(await this.chef.getRewardMultiplier(0, userAddress1, { from: userAddress1 })).to.be.bignumber.equal(new BN(20))
                 expect(await this.chef.getRewardMultiplier(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(21))
                 await this.chef.deposit(1, "100000000000000000000000", 12, { from: userAddress1 })
@@ -849,6 +829,7 @@ describe('MasterChef', function () {
 
         it("Distributing exit fee share", async function () {
             await this.chef.deposit("0", "100000", "12", { from: userAddress1 })
+            await this.chef.setDaaAddress(ownerAddress, { from: ownerAddress })
             expect(await this.chef.distributeExitFeeShare("100", { from: ownerAddress }));
         })
     })
@@ -884,8 +865,8 @@ describe('MasterChef', function () {
             await this.chef.deposit(0, "1000", "0", { from: userAddress2 })
             //on first withdra attempt cooldown period start
             await this.chef.withdraw(0, false, { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801)
+            //await time after 7 DAYS
+            await time.increase(604801)
             await this.astra.transfer(this.chef.address, "100000", { from: ownerAddress });
             await this.chef.withdraw(0, false, { from: userAddress2 })
             expect(await this.chef.checkHighestStaker("0", userAddress2, { from: userAddress2 })).to.be.equal(false);
@@ -941,7 +922,7 @@ describe('MasterChef', function () {
             
             await this.chef.withdraw(0, false, { from: userAddress1 })
             // after 7 days
-            time.increase(604800)
+            await time.increase(604800)
             await this.chef.withdraw(0, false, { from: userAddress1 })
             expect(await this.chef.checkHighestStaker("0", userAddress1, { from: userAddress1 })).to.be.equal(false);
         })
@@ -965,7 +946,7 @@ describe('MasterChef', function () {
             expect(await this.chef.viewEligibleAmount(0, userAddress1, { from: userAddress1 })).to.be.bignumber.equal(new BN(2000))
             await this.chef.withdraw(0, false, { from: userAddress1 })
             // after 7 days
-            time.increase(604800)
+            await time.increase(604800)
             await this.chef.withdraw(0, false, { from: userAddress1 })
             expect(await this.chef.checkHighestStaker("0", userAddress1, { from: userAddress1 })).to.be.equal(true);
         })
@@ -989,8 +970,8 @@ describe('MasterChef', function () {
             await this.chef.addVault("12", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "100000000000000000000000", { from: userAddress2 })
             await this.chef.deposit(0, "100000000000000000000000", "12", { from: userAddress2 })
-            //time after 7 DAYS
-            time.increase(604801);
+            //await time after 7 DAYS
+            await time.increase(604801);
             //get updated staking score after 1 days 
             expect(await this.chef.votingPower(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN("200000000000000000000000"));
         })
@@ -1001,8 +982,8 @@ describe('MasterChef', function () {
             await this.chef.addVault("6", { from: ownerAddress })
             await this.lp.approve(this.chef.address, "500000000000000000000000", { from: userAddress2 })
             await this.chef.deposit(0, "500000000000000000000000", "6", { from: userAddress2 })
-            //time after 10 DAYS
-            time.increase(864001);
+            //await time after 10 DAYS
+            await time.increase(864001);
             //get updated staking score after 1 days 
             expect(await this.chef.votingPower(0, userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN("216666666666666666666665"));
         })
@@ -1029,126 +1010,126 @@ describe('MasterChef', function () {
 
         it("Chef should have ASTRA while claiming ASTR reward without stake", async function () {
             await this.chef.deposit(0, "100000000000000000000000", 12, { from: userAddress1 })
-            time.increase(86401)
+            await time.increase(86401)
             expect(await this.chef.getRewardMultiplier(0, userAddress1, { from: userAddress1 })).to.be.bignumber.equal(new BN(20))
             await this.chef.deposit(1, "100000000000000000000000", 12, { from: userAddress1 })
             await this.chef.distributeReward(1, 0, "100000000000000000000", { from: ownerAddress })
-            time.increase(86401)
+            await time.increase(86401)
             expect(await this.chef.viewRewardInfo(1, { from: userAddress1 })).to.be.bignumber.equal(new BN("100000000000000002000"))
             expect(await this.chef.withdrawASTRReward(1, false, { from: userAddress1 }), "Insufficient amount on lm pool contract")
         })
 
         it("Claiming ASTR reward without stake after 1 day", async function () {
             await this.chef.deposit(0, "100000000000000000000000", 12, { from: userAddress1 })
-            time.increase(86401)
+            await time.increase(86401)
             expect(await this.chef.getRewardMultiplier(0, userAddress1, { from: userAddress1 })).to.be.bignumber.equal(new BN(20))
             await this.chef.deposit(1, "100000000000000000000000", 12, { from: userAddress1 })
             await this.chef.distributeReward(1, 0, "100000000000000000000", { from: ownerAddress })
-            time.increase(86401)
+            await time.increase(86401)
             expect(await this.chef.viewRewardInfo(1, { from: userAddress1 })).to.be.bignumber.equal(new BN("100000000000000002000"))
             expect(await this.astra.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("100000000000000000000000"))
             await this.astra.transfer(this.chef.address, "100000000000000010000", { from: ownerAddress })
             expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("900000000000000000000000"))
             await this.chef.withdrawASTRReward(1, false, { from: userAddress1 });
-            expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("900011000000000000000000"))
+            expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("900011000000000000000440"))
         })
 
         it("Claiming ASTR reward without stake after 20 day", async function () {
             await this.chef.deposit(0, "100000000000000000000000", 12, { from: userAddress1 })
-            time.increase(86401)
+            await time.increase(86401)
             expect(await this.chef.getRewardMultiplier(0, userAddress1, { from: userAddress1 })).to.be.bignumber.equal(new BN(20))
             await this.chef.deposit(1, "100000000000000000000000", 12, { from: userAddress1 })
             await this.chef.distributeReward(1, 0, "100000000000000000000", { from: ownerAddress })
-            time.increase(86400 * 20 + 1)
+            await time.increase(86400 * 20 + 1)
             expect(await this.chef.viewRewardInfo(1, { from: userAddress1 })).to.be.bignumber.equal(new BN("100000000000000002000"))
             expect(await this.astra.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("100000000000000000000000"))
             await this.astra.transfer(this.chef.address, "100000000000000010000", { from: ownerAddress })
             expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("900000000000000000000000"))
             await this.chef.withdrawASTRReward(1, false, { from: userAddress1 });
-            expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("900030000000000000000000"))
+            expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("900030000000000000001200"))
         })
 
         it("Claiming ASTR reward without stake after 90 day", async function () {
             await this.chef.deposit(0, "100000000000000000000000", 12, { from: userAddress1 })
-            time.increase(86401)
+            await time.increase(86401)
             expect(await this.chef.getRewardMultiplier(0, userAddress1, { from: userAddress1 })).to.be.bignumber.equal(new BN(20))
             await this.chef.deposit(1, "100000000000000000000000", 12, { from: userAddress1 })
             await this.chef.distributeReward(1, 0, "100000000000000000000", { from: ownerAddress })
-            time.increase(86400 * 90 + 1)
+            await time.increase(86400 * 90 + 1)
             expect(await this.chef.viewRewardInfo(1, { from: userAddress1 })).to.be.bignumber.equal(new BN("100000000000000002000"))
             expect(await this.astra.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("100000000000000000000000"))
             await this.astra.transfer(this.chef.address, "100000000000000010000", { from: ownerAddress })
             expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("900000000000000000000000"))
             await this.chef.withdrawASTRReward(1, false, { from: userAddress1 });
-            expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("900100000000000000000000"))
+            expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("900100000000000000004000"))
         })
 
         it("Withdrawing staked amount and ASTR reward without stake after 1 day", async function () {
             await this.chef.deposit(0, "100000000000000000000000", 12, { from: userAddress1 })
-            time.increase(86401)
+            await time.increase(86401)
             expect(await this.chef.getRewardMultiplier(0, userAddress1, { from: userAddress1 })).to.be.bignumber.equal(new BN(20))
             await this.chef.deposit(1, "100000000000000000000000", 0, { from: userAddress1 })
             await this.chef.distributeReward(1, 0, "100000000000000000000", { from: ownerAddress })
-            time.increase(86401)
+            await time.increase(86401)
             expect(await this.chef.viewRewardInfo(1, { from: userAddress1 })).to.be.bignumber.equal(new BN("100000000000000002000"))
             expect(await this.astra.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("100000000000000000000000"))
             await this.astra.transfer(this.chef.address, "1000000000000000100000", { from: ownerAddress })
             expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("900000000000000000000000"))
             await this.chef.withdraw(1, false, { from: userAddress1 })
             // after 7 days
-            time.increase(604800)
+            await time.increase(604800)
             await this.chef.withdraw(1, false, { from: userAddress1 })
             // After 8 days
-            expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("900018000000000000000000"))
+            expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("900018000000000000001080"))
             expect(await this.lp.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("1000000000000000000000000"))
             expect(await this.lp.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("0"))
         })
 
         it("Withdrawing staked amount and ASTR reward without stake after 20 day", async function () {
             await this.chef.deposit(0, "100000000000000000000000", 12, { from: userAddress1 })
-            time.increase(86401)
+            await time.increase(86401)
             expect(await this.chef.getRewardMultiplier(0, userAddress1, { from: userAddress1 })).to.be.bignumber.equal(new BN(20))
             await this.chef.deposit(1, "100000000000000000000000", 0, { from: userAddress1 })
             await this.chef.distributeReward(1, 0, "100000000000000000000", { from: ownerAddress })
-            time.increase(86400 * 13 + 1)
+            await time.increase(86400 * 13 + 1)
             expect(await this.chef.viewRewardInfo(1, { from: userAddress1 })).to.be.bignumber.equal(new BN("100000000000000002000"))
             expect(await this.astra.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("100000000000000000000000"))
             await this.astra.transfer(this.chef.address, "1000000000000000100000", { from: ownerAddress })
             expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("900000000000000000000000"))
             await this.chef.withdraw(1, false, { from: userAddress1 })
             // after 7 days
-            time.increase(604800)
+            await time.increase(604800)
             await this.chef.withdraw(1, false, { from: userAddress1 })
             //After 13+7 = 20 days
-            expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("900030000000000000000000"))
+            expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("900030000000000000001800"))
             expect(await this.lp.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("1000000000000000000000000"))
             expect(await this.lp.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("0"))
         })
 
         it("Withdrawing staked amount and ASTR reward without stake after 90 day", async function () {
             await this.chef.deposit(0, "100000000000000000000000", 12, { from: userAddress1 })
-            time.increase(86401)
+            await time.increase(86401)
             expect(await this.chef.getRewardMultiplier(0, userAddress1, { from: userAddress1 })).to.be.bignumber.equal(new BN(20))
             await this.chef.deposit(1, "100000000000000000000000", 0, { from: userAddress1 })
             await this.chef.distributeReward(1, 0, "100000000000000000000", { from: ownerAddress })
-            time.increase(86400 * 83 + 1)
+            await time.increase(86400 * 83 + 1)
             expect(await this.chef.viewRewardInfo(1, { from: userAddress1 })).to.be.bignumber.equal(new BN("100000000000000002000"))
             expect(await this.astra.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("100000000000000000000000"))
             await this.astra.transfer(this.chef.address, "1000000000000000100000", { from: ownerAddress })
             expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("900000000000000000000000"))
             await this.chef.withdraw(1, false, { from: userAddress1 })
             // after 7 days
-            time.increase(604800)
+            await time.increase(604800)
             await this.chef.withdraw(1, false, { from: userAddress1 })
             // after 83+7 = 90 days
-            expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("900100000000000000000000"))
+            expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("900100000000000000006000"))
             expect(await this.lp.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("1000000000000000000000000"))
             expect(await this.lp.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("0"))
         })
 
         it("Claiming ASTR reward with staking in astra pool", async function () {
             await this.chef.deposit(0, "100000000000000000000000", 12, { from: userAddress1 })
-            time.increase(86401)
+            await time.increase(86401)
             expect(await this.chef.getRewardMultiplier(0, userAddress1, { from: userAddress1 })).to.be.bignumber.equal(new BN(20))
             await this.chef.deposit(1, "100000000000000000000000", 12, { from: userAddress1 })
             await this.chef.distributeReward(1, 0, "100000000000000000000", { from: ownerAddress })
@@ -1160,18 +1141,18 @@ describe('MasterChef', function () {
 
         it("Withdrawing staked amount and ASTR reward without stake after 1 day", async function () {
             await this.chef.deposit(0, "100000000000000000000000", 12, { from: userAddress1 })
-            time.increase(86401)
+            await time.increase(86401)
             expect(await this.chef.getRewardMultiplier(0, userAddress1, { from: userAddress1 })).to.be.bignumber.equal(new BN(20))
             await this.chef.deposit(1, "100000000000000000000000", 0, { from: userAddress1 })
             await this.chef.distributeReward(1, 0, "100000000000000000000", { from: ownerAddress })
-            time.increase(86401)
+            await time.increase(86401)
             expect(await this.chef.viewRewardInfo(1, { from: userAddress1 })).to.be.bignumber.equal(new BN("100000000000000002000"))
             expect(await this.astra.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("100000000000000000000000"))
             await this.astra.transfer(this.chef.address, "1000000000000000100000", { from: ownerAddress })
             expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("900000000000000000000000"))
             await this.chef.withdraw(1, true, { from: userAddress1 })
             // after 7 days
-            time.increase(604800)
+            await time.increase(604800)
             await this.chef.withdraw(1, true, { from: userAddress1 })
             // After 8 days
             expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal(new BN("900000000000000000000000"))
@@ -1182,52 +1163,52 @@ describe('MasterChef', function () {
 
     describe("premium payout integration", function () {
         beforeEach(async function () {
-            await this.chef.add(this.lp.address, { from: ownerAddress })
             await this.chef.add(this.astra.address, { from: ownerAddress })
+            await this.chef.add(this.lp.address, { from: ownerAddress })
             await this.chef.addVault("3", { from: ownerAddress })
             await this.chef.addVault("12", { from: ownerAddress })
 
-            await this.lp.transfer(userAddress1, "1000000000000000000000000", { from: ownerAddress })
-            await this.lp.transfer(userAddress2, "1000000000000000000000000", { from: ownerAddress })
-            await this.lp.approve(this.chef.address, "1000000000000000000000000", { from: userAddress1 })
-            await this.lp.approve(this.chef.address, "1000000000000000000000000", { from: userAddress2 })
+            await this.astra.transfer(userAddress1, "1000000000000000000000000", { from: ownerAddress })
+            await this.astra.transfer(userAddress2, "1000000000000000000000000", { from: ownerAddress })
+            await this.astra.approve(this.chef.address, "1000000000000000000000000", { from: userAddress1 })
+            await this.astra.approve(this.chef.address, "1000000000000000000000000", { from: userAddress2 })
         })
 
         it("check premium payout values", async function () {
             await this.chef.deposit("0", "800000000000000000000000", 12, { from: userAddress1 })
             await this.chef.deposit("0", "300000000000000000000000", 12, { from: userAddress2 })
-            time.increase(86401)
+            await time.increase(86401)
             expect(await this.chef.getPremiumPayoutBonus("0", userAddress1, { from: userAddress1 })).to.be.bignumber.equal(new BN(20));
             expect(await this.chef.getPremiumPayoutBonus("0", userAddress2, { from: userAddress2 })).to.be.bignumber.equal(new BN(10));
         })
 
         it("deposit from DAA with no premium payout", async function () {
             await this.chef.setDaaAddress(userAddress1, { from: ownerAddress })
-            time.increase(86401)
+            await time.increase(86401)
             expect(await this.chef.getPremiumPayoutBonus("0", userAddress1, { from: userAddress1 })).to.be.bignumber.equal(new BN(0));
-            expect(await this.lp.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("0"));
+            expect(await this.astra.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("0"));
             await this.chef.depositFromDaaAndDAO("0", "1000000000000000000000", "3", userAddress1, false, { from: userAddress1 });
-            expect(await this.lp.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("1000000000000000000000"));
+            expect(await this.astra.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("1000000000000000000000"));
         })
 
         it("deposit from DAA with premium payout with premium option", async function () {
             await this.chef.setDaaAddress(userAddress1, { from: ownerAddress })
             await this.chef.deposit(0, "300000000000000000000000", 12, { from: userAddress1 })
-            time.increase(86401)
+            await time.increase(86401)
             expect(await this.chef.getPremiumPayoutBonus("0", userAddress1, { from: userAddress1 })).to.be.bignumber.equal(new BN(10));
-            expect(await this.lp.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("300000000000000000000000"));
+            expect(await this.astra.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("300000000000000000000000"));
             await this.chef.depositFromDaaAndDAO("0", "1000000000000000000000", "3", userAddress1, true, { from: userAddress1 });
-            expect(await this.lp.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("301000000000000000000000"));
+            expect(await this.astra.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("301000000000000000000000"));
         })
 
         it("deposit from DAA with premium payout without premium option", async function () {
             await this.chef.setDaaAddress(userAddress1, { from: ownerAddress })
             await this.chef.deposit(0, "800000000000000000000000", 12, { from: userAddress1 })
-            time.increase(86401)
+            await time.increase(86401)
             expect(await this.chef.getPremiumPayoutBonus("0", userAddress1, { from: userAddress1 })).to.be.bignumber.equal(new BN(20));
-            expect(await this.lp.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("800000000000000000000000"));
+            expect(await this.astra.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("800000000000000000000000"));
             await this.chef.depositFromDaaAndDAO("0", "1000000000000000000000", "3", userAddress1, false, { from: userAddress1 });
-            expect(await this.lp.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("801000000000000000000000"));
+            expect(await this.astra.balanceOf(this.chef.address)).to.be.bignumber.equal(new BN("801000000000000000000000"));
         })
     })
 
@@ -1240,12 +1221,12 @@ describe('MasterChef', function () {
         })
 
         it("should not set the lm pool address except owner", async function () {
-            await expectRevert(this.chef.setLmPoolAddress(userAddress1, { from: userAddress2 }), "Ownable: caller is not the owner");
+            await expectRevert(this.chef.setLmPoolAddress(userAddress1, true, { from: userAddress2 }), "Ownable: caller is not the owner");
         })
 
         it("should set the lm pool address", async function () {
-            await this.chef.setLmPoolAddress(userAddress1, { from: ownerAddress })
-            expect(await this.chef.lmpooladdr()).to.be.equal(userAddress1);
+            await this.chef.setLmPoolAddress(userAddress1, true, { from: ownerAddress })
+            expect(await this.chef.lmpooladdr(userAddress1)).to.be.equal(true);
         });
     })
 
