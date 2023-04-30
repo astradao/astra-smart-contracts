@@ -1,88 +1,31 @@
-/**
- *Submitted for verification at Etherscan.io on 2020-09-15
-*/
-
-pragma solidity 0.5.17;
+// SPDX-License-Identifier: BUSL-1.1
+pragma solidity 0.8.19;
 pragma experimental ABIEncoderV2;
 
-/**
- * @title Initializable
- *
- * @dev Helper contract to support initializer functions. To use it, replace
- * the constructor with a function that has the `initializer` modifier.
- * WARNING: Unlike constructors, initializer functions must be manually
- * invoked. This applies both to deploying an Initializable contract, as well
- * as extending an Initializable contract via inheritance.
- * WARNING: When used with inheritance, manual care must be taken to not invoke
- * a parent initializer twice, or ensure that all initializers are idempotent,
- * because this is not dealt with automatically as with constructors.
- */
-contract Initializable {
-
-  /**
-   * @dev Indicates that the contract has been initialized.
-   */
-  bool private initialized;
-
-  /**
-   * @dev Indicates that the contract is in the process of being initialized.
-   */
-  bool private initializing;
-
-  /**
-   * @dev Modifier to use in the initializer function of a contract.
-   */
-  modifier initializer() {
-    require(initializing || isConstructor() || !initialized, "Contract instance has already been initialized");
-
-    bool wasInitializing = initializing;
-    initializing = true;
-    initialized = true;
-
-    _;
-
-    initializing = wasInitializing;
-  }
-
-  /// @dev Returns true if and only if the function is running in the constructor
-  function isConstructor() private view returns (bool) {
-    // extcodesize checks the size of the code stored in an address, and
-    // address returns the current address. Since the code is still not
-    // deployed when running a constructor, any checks on its code size will
-    // yield zero, making it an effective way to detect if a contract is
-    // under construction or not.
-    uint256 cs;
-    assembly { cs := extcodesize(address) }
-    return cs == 0;
-  }
-
-  // Reserved storage space to allow for layout changes in the future.
-  uint256[50] private ______gap;
-}
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
 contract GovernorAlphaMock is Initializable {
     /// @notice The name of this contract
-    string public constant name = "ASTR Governor Alpha";
+    string public constant name = "ASTRA Governor Alpha";
     
-    uint private quorumVote = 40e18;
+    uint256 public constant MULTIPLIER_DECIMAL = 10000000000000;
     
-    uint private minVoterCount = 1;
+    uint private quorumVote;
     
-    uint private minProposalTimeIntervalSec = 1 days;
+    uint private minVoterCount;
+    
+    uint public minProposalTimeIntervalSec;
     
     uint public lastProposalTimeIntervalSec;
 
-    uint256 public proposalTokens = 50000000 * 10**18;
+    uint256 public proposalTokens;
 
     uint256 public lastProposal;
 
-    uint256 public stakeVault = 6 ;
-
-    /// @notice To track the initialize time of Governance contract.
-    uint256 public startTime;
+    uint256 public stakeVault;
 
     /// @notice The number of votes in support of a proposal required in order for a quorum to be reached and for a vote to succeed
-    function quorumVotes() public view returns (uint) { return quorumVote; } // 4% of ASTR
+    function quorumVotes() public view returns (uint) { return quorumVote; }
 
     /// @notice The maximum number of actions that can be included in a proposal
     function proposalMaxOperations() public pure returns (uint) { return 10; } // 10 actions
@@ -102,11 +45,11 @@ contract GovernorAlphaMock is Initializable {
     /// @notice The address of the ASTR governance token
     ASTRInterface public ASTR;
 
-    /// @notice The address of the ASTRA Top 100 token holders
-    IHolders public topTraders;
-
     /// @notice The total number of proposals
     uint public proposalCount;
+
+    /// @notice The total number of targets.
+    uint256 public totalTarget;
     
     // @notice voter info 
     struct VoterInfo {
@@ -165,8 +108,11 @@ contract GovernorAlphaMock is Initializable {
         mapping (address => Receipt) receipts;
     }
 
-    /// @notice Track Time proposal is created
+    /// @notice Track Time proposal is created.
     mapping(uint256 => uint256)public proposalCreatedTime;
+
+    /// @notice Track total proposal user voted on.
+    mapping(address => uint256)public propoasalVoted;
 
     /// @notice Ballot receipt record for a voter
     struct Receipt {
@@ -204,6 +150,8 @@ contract GovernorAlphaMock is Initializable {
     /// @notice The latest proposal for each proposer
     mapping (address => uint) public latestProposalIds;
 
+    mapping (uint256 => bool) public isProposalQueued;
+
     /// @notice The EIP-712 typehash for the contract's domain
     bytes32 public constant DOMAIN_TYPEHASH = keccak256("EIP712Domain(string name,uint256 chainId,address verifyingContract)");
 
@@ -231,9 +179,13 @@ contract GovernorAlphaMock is Initializable {
         require(_chef != address(0), "Zero Address");
         timelock = TimelockInterface(timelock_);
         ASTR = ASTRInterface(ASTR_);
-        // topTraders = IHolders(_holders);
         chefAddress = _chef;
-        startTime = block.timestamp;
+        quorumVote = 40e18;
+        minVoterCount = 1;
+        minProposalTimeIntervalSec = 1 days;
+        proposalTokens = 5000000000 * 10**18;
+        stakeVault = 6 ;
+        totalTarget = 3;
     }
     /**
      * @notice Update Quorum Value
@@ -287,6 +239,17 @@ contract GovernorAlphaMock is Initializable {
         proposalTokens = _proposalTokens; 
     }
     
+    /**
+     * @notice Update number of target.
+     * @param _totalTarget New maxium target.
+	 * @dev Update number of maxium target.
+     */
+
+    function updateTotalTarget(uint256 _totalTarget) external {
+        require(msg.sender == address(timelock), "Call must come from Timelock.");
+        totalTarget = _totalTarget; 
+    }
+
     function _acceptAdmin() external {
         timelock.acceptAdmin();
     }
@@ -303,21 +266,17 @@ contract GovernorAlphaMock is Initializable {
      */
     function propose(address[] memory targets, uint[] memory values, string[] memory signatures, bytes[] memory calldatas, string memory description, bool _fundametalChanges) public returns (uint) {
         // Check if entered configuration is correct or not.
+        require(targets.length <= totalTarget, "GovernorAlpha::propose: Target must be in range");
         require(targets.length == values.length && targets.length == signatures.length && targets.length == calldatas.length, "GovernorAlpha::propose: proposal function information arity mismatch");
         require(targets.length != 0, "GovernorAlpha::propose: must provide actions");
         require(targets.length <= proposalMaxOperations(), "GovernorAlpha::propose: too many actions");
-        // Check if called is top staker or not.
-        bool isTopStaker = ChefInterface(chefAddress).checkHighestStaker(0,msg.sender);
-        // Check if contract is deployed 90 days ago or not. If yes then caller must be top staker.
-        if(block.timestamp<add256(startTime,7776000)){
-        require(isTopStaker == true,"GovernorAlpha::propose: Only Top stakers can create proposal");
-        }
         // Deposit some Astra tokens to create proposal.
         (bool transferStatus) = depositToken(msg.sender, address(this), proposalTokens);
+        stakeToken(msg.sender, proposalTokens);
         // Check transfer status
         require(transferStatus == true, "GovernorAlpha::propose: need to transfer some tokens on contract to create proposal");
         // Check the minimum proposal that can be created in a single day.
-        require(add256(lastProposalTimeIntervalSec, sub256(minProposalTimeIntervalSec, mod256(lastProposalTimeIntervalSec, minProposalTimeIntervalSec))) < now, "GovernorAlpha::propose: Only one proposal can be create in one day");
+        require(add256(lastProposalTimeIntervalSec, sub256(minProposalTimeIntervalSec, mod256(lastProposalTimeIntervalSec, minProposalTimeIntervalSec))) < block.timestamp, "GovernorAlpha::propose: Only one proposal can be create in one day");
 
         // Check if caller has active proposal or not. If so previous proposal must be accepted or failed first.
         uint latestProposalId = latestProposalIds[msg.sender];
@@ -327,7 +286,6 @@ contract GovernorAlphaMock is Initializable {
           require(proposersLatestProposalState != ProposalState.Pending, "GovernorAlpha::propose: one live proposal per proposer, found an already pending proposal");
         }
         uint256 returnValue = setProposalDetail( targets, values, signatures, calldatas, description, _fundametalChanges);
-        stakeToken(msg.sender, proposalTokens);
         return returnValue;
     }
 
@@ -340,27 +298,26 @@ contract GovernorAlphaMock is Initializable {
         uint startBlock = add256(block.number, votingDelay());
         uint endBlock = add256(startBlock, votingPeriod());
         proposalCount = add256(proposalCount,1);
-        Proposal memory newProposal = Proposal({
-            id: proposalCount,
-            proposer: msg.sender,
-            eta: 0,
-            targets: targets,
-            values: values,
-            signatures: signatures,
-            calldatas: calldatas,
-            startBlock: startBlock,
-            endBlock: endBlock,
-            forVotes: 0,
-            againstVotes: 0,
-            canceled: false,
-            executed: false,
-            fundamentalchanges:_fundametalChanges
-        });
+        Proposal storage newProposal = proposals[proposalCount];
+
+        newProposal.id = proposalCount;
+        newProposal.proposer = msg.sender;
+        newProposal.eta = 0;
+        newProposal.targets = targets;
+        newProposal.values = values;
+        newProposal.signatures = signatures;
+        newProposal.calldatas = calldatas;
+        newProposal.startBlock = startBlock;
+        newProposal.endBlock = endBlock;
+        newProposal.forVotes = 0;
+        newProposal.againstVotes = 0;
+        newProposal.canceled = false;
+        newProposal.executed = false;
+        newProposal.fundamentalchanges =_fundametalChanges;
 
         // Update details for proposal.
         proposalCreatedTime[proposalCount] = block.number;
 
-        proposals[newProposal.id] = newProposal;
         latestProposalIds[newProposal.proposer] = newProposal.id;
         lastProposalTimeIntervalSec = block.timestamp;
         
@@ -389,7 +346,7 @@ contract GovernorAlphaMock is Initializable {
 
     function stakeToken(address sender, uint256 amount) internal {
         ASTR.approve(address(chefAddress),amount);
-        ChefInterface(chefAddress).depositFromDaaAndDAO(0,amount,stakeVault,sender,false);
+        ChefInterface(chefAddress).depositWithUserAddress(amount,stakeVault,sender);
     }
 
 
@@ -408,6 +365,7 @@ contract GovernorAlphaMock is Initializable {
             _queueOrRevert(proposal.targets[i], proposal.values[i], proposal.signatures[i], proposal.calldatas[i], eta);
         }
         proposal.eta = eta;
+        isProposalQueued[proposalId] = true;
         emit ProposalQueued(proposalId, eta);
     }
 
@@ -431,7 +389,7 @@ contract GovernorAlphaMock is Initializable {
         Proposal storage proposal = proposals[proposalId];
         proposal.executed = true;
         for (uint i = 0; i < proposal.targets.length; i++) {
-            timelock.executeTransaction.value(proposal.values[i])(proposal.targets[i], proposal.values[i], proposal.signatures[i], proposal.calldatas[i], proposal.eta);
+            timelock.executeTransaction{value : proposal.values[i]}(proposal.targets[i], proposal.values[i], proposal.signatures[i], proposal.calldatas[i], proposal.eta);
         }
         lastProposal = proposalId;
         emit ProposalExecuted(proposalId);
@@ -444,10 +402,12 @@ contract GovernorAlphaMock is Initializable {
      */
 
     function cancel(uint proposalId) external {
-        ProposalState state = state(proposalId);
-        require(state != ProposalState.Executed, "GovernorAlpha::cancel: cannot cancel executed proposal");
+        ProposalState _state = state(proposalId);
+        require(_state != ProposalState.Executed, "GovernorAlpha::cancel: cannot cancel executed proposal");
 
         Proposal storage proposal = proposals[proposalId];
+
+        require(msg.sender == proposal.proposer, "GovernorAlpha::cancel: Only creator can cancel");
 
         proposal.canceled = true;
         for (uint i = 0; i < proposal.targets.length; i++) {
@@ -479,6 +439,9 @@ contract GovernorAlphaMock is Initializable {
         return proposals[proposalId].receipts[voter];
     }
 
+    function getVotingStatus(address _voter) external view returns(bool) {
+        return (propoasalVoted[_voter] == proposalCount);
+    }
     /**
      * @notice Get state of proposal
      * @param proposalId Proposal Id.
@@ -497,29 +460,29 @@ contract GovernorAlphaMock is Initializable {
         // This is used to check if proposal passed minimum governor barrier.
         if(proposal.fundamentalchanges){
             percentage = 20;
-            if(votersInfo[proposalId].governors>=2){
+            if(votersInfo[proposalId].governors>=3){
                 checkifMinGovenor = true;
             }else{
                 checkifMinGovenor = false;
             }
         }else{
-            if(votersInfo[proposalId].governors>=1){
+            if(votersInfo[proposalId].governors>=2){
                 checkifMinGovenor = true;
             }else{
                 checkifMinGovenor = false;
             }
         }
-        // Check if proposal is fast vote or not. Only for non fundamental proposal.
-        if(checkFastVote && checkifMinGovenor){
+        // Check if proposal is fast vote or not. Only for non fundamental proposal. 
+        if(checkFastVote && checkifMinGovenor && !isProposalQueued[proposalId]){
             return ProposalState.Succeeded;
         }
         else if (proposal.canceled) {
             return ProposalState.Canceled;
-        } else if (block.number <= proposal.startBlock) {
+        } else if (block.number <= proposal.startBlock && proposal.eta == 0) {
             return ProposalState.Pending;
-        } else if (block.number <= proposal.endBlock) {
+        } else if (block.number <= proposal.endBlock && proposal.eta == 0) {
             return ProposalState.Active;
-        } else if (proposal.forVotes <= proposal.againstVotes || proposal.forVotes < quorumVotes()) {
+        } else if ((proposal.forVotes <= proposal.againstVotes || proposal.forVotes < quorumVotes()) && proposal.eta == 0) {
             return ProposalState.Defeated;
         } else if (proposal.eta == 0) {
             // Check if proposal matched all the conditions for acceptance.
@@ -581,7 +544,7 @@ contract GovernorAlphaMock is Initializable {
      */
 
     function castVote(uint proposalId, bool support) external {
-        return _castVote(msg.sender, proposalId, support);
+        _castVote(msg.sender, proposalId, support);
     }
 
     /**
@@ -600,7 +563,7 @@ contract GovernorAlphaMock is Initializable {
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
         address signatory = ecrecover(digest, v, r, s);
         require(signatory != address(0), "GovernorAlpha::castVoteBySig: invalid signature");
-        return _castVote(signatory, proposalId, support);
+        _castVote(signatory, proposalId, support);
     }
     /**
     * @dev Cast vote internal function.
@@ -608,7 +571,7 @@ contract GovernorAlphaMock is Initializable {
 
     function _castVote(address voter, uint proposalId, bool support) internal {
         require(state(proposalId) == ProposalState.Active, "GovernorAlpha::_castVote: voting is closed");
-        bool isTopStaker = ChefInterface(chefAddress).checkHighestStaker(0,msg.sender);
+        bool isTopStaker = ChefInterface(chefAddress).checkHighestStaker(voter);
         if(!votersInfo[proposalId].voterAddress[voter])
         {
           votersInfo[proposalId].voterAddress[voter] = true;
@@ -621,20 +584,37 @@ contract GovernorAlphaMock is Initializable {
         Receipt storage receipt = proposal.receipts[voter];
         require(receipt.hasVoted == false, "GovernorAlpha::_castVote: voter already voted");
         // uint256 votes = ASTR.getPriorVotes(voter, proposal.startBlock);
-        uint256 votes = ChefInterface(chefAddress).stakingScore(0,voter);
-        // votes = votes.mul(ChefInterface(chefAddress).getRewardMultiplier(0,voter)).div(10);
-         votes = div256(mul256(votes,ChefInterface(chefAddress).getRewardMultiplier(0,voter)),10);
+        uint256 votes = userVoteCount(0, voter);
         if (support) {
             proposal.forVotes = add256(proposal.forVotes, votes);
         } else {
             proposal.againstVotes = add256(proposal.againstVotes, votes);
         }
-
+        propoasalVoted[voter] = add256(propoasalVoted[voter],1);
         receipt.hasVoted = true;
         receipt.support = support;
         receipt.votes = votes;
 
         emit VoteCast(voter, proposalId, support, votes);
+    }
+
+    function userVoteCount(
+        uint256 _pid,
+        address _userAddress
+    )
+        internal
+        view
+        returns (
+            uint256
+        )
+    {
+        uint256 _amount;
+        uint256 _stakingScore;
+        uint256 _currentMultiplier;
+        uint256 _maxMultiplier;
+        (_amount,,,,,,) = ChefInterface(chefAddress).userInfo(_pid,_userAddress);
+        (_stakingScore, _currentMultiplier, _maxMultiplier) = ChefInterface(chefAddress).stakingScoreAndMultiplier(_userAddress,_amount);
+        return div256(mul256(_stakingScore,_currentMultiplier), MULTIPLIER_DECIMAL);
     }
 
    /**
@@ -681,7 +661,7 @@ contract GovernorAlphaMock is Initializable {
     }
 
 
-    function getChainId() internal pure returns (uint) {
+    function getChainId() internal view returns (uint) {
         uint chainId;
         assembly { chainId := chainid() }
         return chainId;
@@ -705,12 +685,22 @@ interface ASTRInterface {
 }
 
 interface ChefInterface{
-    function checkHighestStaker(uint256 _pid,address user) external view returns (bool);
-   function getRewardMultiplier(uint256 _pid, address _user) external view returns (uint256);
-   function stakingScore(uint256 _pid, address _userAddress) external view returns (uint256);
-   function depositFromDaaAndDAO(uint256 _pid, uint256 _amount, uint256 vault, address _sender,bool isPremium) external;
-}
-
-interface IHolders {
-    function checktoptrader(address _addr) external view returns (bool);
+    function checkHighestStaker(address user) external view returns (bool);
+    function stakingScoreAndMultiplier(
+        address _userAddress,
+        uint256 _stakedAmount
+    )
+        external
+        view
+        returns (
+            uint256,
+            uint256,
+            uint256
+        );
+    function depositWithUserAddress(
+        uint256 _amount,
+        uint256 _vault,
+        address _userAddress
+    ) external;
+    function userInfo(uint256 _pid, address _userAddress) external view returns (uint256, uint256, uint256, uint256, uint256, bool,uint256);
 }

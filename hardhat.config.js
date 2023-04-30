@@ -1,47 +1,34 @@
+require("dotenv").config();
 require("@nomiclabs/hardhat-waffle");
 require("@openzeppelin/hardhat-upgrades");
 require("@nomiclabs/hardhat-etherscan");
 require("@nomiclabs/hardhat-truffle5");
 
-task("accounts", "Prints the list of accounts", async () => {
-  const accounts = await ethers.getSigners();
-
-  for (const account of accounts) {
-    console.log(account.address);
-  }
-});
-
+const { ALCHEMY_API_KEY, GOERLI_PRIVATE_KEY, ETHERSCAN_API_KEY } = process.env;
 
 module.exports = {
-  defaultNetwork: "kovan",
+  defaultNetwork: "hardhat",
   networks: {
     hardhat: {
       blockGasLimit: 10000000,
+      forking: {
+        url: `https://eth-mainnet.alchemyapi.io/v2/${ALCHEMY_API_KEY}`,
+        blockNumber: 16045262,
+      },
     },
-    kovan: {
-      // You need to pass provider.
-      url: "https://kovan.infura.io/v3/project_id",
-      // You need to pass provider.
-      accounts: ["You_Account_Private_Key"],
-    },
-
-    mainnet: {
-      // You need to pass provider.
-      url:"https://mainnet.infura.io/v3/project_id",
-      // You need to manually pass the array of private of accounts
-      accounts: ["You_Account_Private_Key"],
-      gas: 8000000
+    goerli: {
+      url: `https://eth-goerli.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
+      accounts: [GOERLI_PRIVATE_KEY],
     },
     ganache: {
       url: "http://127.0.0.1:7545",
     },
   },
   etherscan: {
-    // This will used to verify the contract
-    // apiKey: "Etherscan_API_KEY"
+    apiKey: ETHERSCAN_API_KEY,
   },
   solidity: {
-    compilers:[
+    compilers: [
       {
         version: "0.5.17",
         settings: {
@@ -59,9 +46,8 @@ module.exports = {
             runs: 200,
           },
         },
-      }
-    ]
-
+      },
+    ],
   },
   paths: {
     sources: "./main",

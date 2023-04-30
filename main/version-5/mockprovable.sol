@@ -1,28 +1,27 @@
-pragma solidity >= 0.5.0 < 0.6.0; // Incompatible compiler version - please select a compiler within the stated pragma range, or use a different version of the provableAPI!
-
-contract solcChecker {
-/* INCOMPATIBLE SOLC: import the following instead: "github.com/oraclize/ethereum-api/oraclizeAPI_0.4.sol" */ function f(bytes calldata x) external;
+pragma solidity 0.8.19; 
+abstract contract solcChecker {
+/* INCOMPATIBLE SOLC: import the following instead: "github.com/oraclize/ethereum-api/oraclizeAPI_0.4.sol" */ function f(bytes calldata x) virtual external;
 }
 
-contract ProvableI {
+abstract contract ProvableI {
 
     address public cbAddress;
 
-    function setProofType(byte _proofType) external;
-    function setCustomGasPrice(uint _gasPrice) external;
-    function getPrice(string memory _datasource) public returns (uint _dsprice);
-    function randomDS_getSessionPubKeyHash() external view returns (bytes32 _sessionKeyHash);
-    function getPrice(string memory _datasource, uint _gasLimit) public returns (uint _dsprice);
-    function queryN(uint _timestamp, string memory _datasource, bytes memory _argN) public payable returns (bytes32 _id);
-    function query(uint _timestamp, string calldata _datasource, string calldata _arg) external payable returns (bytes32 _id);
-    function query2(uint _timestamp, string memory _datasource, string memory _arg1, string memory _arg2) public payable returns (bytes32 _id);
-    function query_withGasLimit(uint _timestamp, string calldata _datasource, string calldata _arg, uint _gasLimit) external payable returns (bytes32 _id);
-    function queryN_withGasLimit(uint _timestamp, string calldata _datasource, bytes calldata _argN, uint _gasLimit) external payable returns (bytes32 _id);
-    function query2_withGasLimit(uint _timestamp, string calldata _datasource, string calldata _arg1, string calldata _arg2, uint _gasLimit) external payable returns (bytes32 _id);
+    function setProofType(bytes1 _proofType) virtual external;
+    function setCustomGasPrice(uint _gasPrice) virtual external;
+    function getPrice(string memory _datasource) virtual public returns (uint _dsprice);
+    function randomDS_getSessionPubKeyHash() virtual external view returns (bytes32 _sessionKeyHash);
+    function getPrice(string memory _datasource, uint _gasLimit) virtual public returns (uint _dsprice);
+    function queryN(uint _timestamp, string memory _datasource, bytes memory _argN) virtual public payable returns (bytes32 _id);
+    function query(uint _timestamp, string calldata _datasource, string calldata _arg) virtual external payable returns (bytes32 _id);
+    function query2(uint _timestamp, string memory _datasource, string memory _arg1, string memory _arg2) virtual public payable returns (bytes32 _id);
+    function query_withGasLimit(uint _timestamp, string calldata _datasource, string calldata _arg, uint _gasLimit) virtual external payable returns (bytes32 _id);
+    function queryN_withGasLimit(uint _timestamp, string calldata _datasource, bytes calldata _argN, uint _gasLimit) virtual external payable returns (bytes32 _id);
+    function query2_withGasLimit(uint _timestamp, string calldata _datasource, string calldata _arg1, string calldata _arg2, uint _gasLimit) virtual external payable returns (bytes32 _id);
 }
 
-contract OracleAddrResolverI {
-    function getAddress() public returns (address _address);
+abstract contract OracleAddrResolverI {
+    function getAddress() virtual public returns (address _address);
 }
 /*
 
@@ -91,7 +90,7 @@ library Buffer {
       *      would exceed the capacity of the buffer.
       * @param _buf The buffer to append to.
       * @param _data The data to append.
-      * @return The original buffer.
+      * @return _buffer The original buffer.
       *
       */
     function append(buffer memory _buf, bytes memory _data) internal pure returns (buffer memory _buffer) {
@@ -129,7 +128,6 @@ library Buffer {
       * exceed the capacity of the buffer.
       * @param _buf The buffer to append to.
       * @param _data The data to append.
-      * @return The original buffer.
       *
       */
     function append(buffer memory _buf, uint8 _data) internal pure {
@@ -150,7 +148,7 @@ library Buffer {
       * exceed the capacity of the buffer.
       * @param _buf The buffer to append to.
       * @param _data The data to append.
-      * @return The original buffer.
+      * @return _buffer The original buffer.
       *
       */
     function appendInt(buffer memory _buf, uint _data, uint _len) internal pure returns (buffer memory _buffer) {
@@ -257,19 +255,19 @@ contract usingProvable {
     //   Respsonse_data.push(third);
 	// }
 
-    function provable_cbAddress()internal returns (address _callbackAddress) {
+    function provable_cbAddress()internal view returns (address _callbackAddress) {
         return cbAddress;
     }
 
     string RequestFirst = "First_Request";
     string RequestSecond = "Second_Request";
 
-    function compareStrings(string memory a, string memory b) internal view returns (bool) {
+    function compareStrings(string memory a, string memory b) internal pure returns (bool) {
     return (keccak256(abi.encodePacked((a))) == keccak256(abi.encodePacked((b))));
     }
 
-    function provable_getPrice(string memory _datasource) internal returns (uint _queryPrice) {
-        uint _value =10;
+    function provable_getPrice(string memory _datasource) internal pure returns (uint _queryPrice) {
+        uint _value = 10;
         return _value;
     }
 

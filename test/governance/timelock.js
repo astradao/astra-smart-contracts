@@ -12,7 +12,7 @@ const { expect } = require('chai');
 const { signTypedData } = require('eth-sig-util');
 const { increase } = require('@openzeppelin/test-helpers/src/time');
 const { default: BigNumber } = require('bignumber.js');
-const TimeLock = contract.fromArtifact('TimelockMock');
+const TimeLock = contract.fromArtifact('Timelock');
 
 const oneWeekInSeconds = etherUnsigned(7 * 24 * 60 * 60);
 const zero = etherUnsigned(0);

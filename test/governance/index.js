@@ -1,4 +1,5 @@
 const { accounts, contract, privateKeys } = require('@openzeppelin/test-environment');
+const EIP712 = require("../../Util/EIP712");
 
 const { BN, expectRevert, time, expectEvent, constants } = require('@openzeppelin/test-helpers');
 const { expect } = require('chai');
@@ -6,10 +7,10 @@ const { signTypedData } = require('eth-sig-util');
 
 const MAX_DEPLOYED_BYTECODE_SIZE = 24576;
 const Astrsample = contract.fromArtifact('Token');
-const Timelock = contract.fromArtifact('TimelockMock');
+const Timelock = contract.fromArtifact('Timelock');
 const Governance = contract.fromArtifact('GovernorAlphaMock');
 // const TopHolders = contract.fromArtifact('MockTopHolder');
-const MasterChef = contract.fromArtifact('MasterChef');
+const MasterChef = contract.fromArtifact('MasterChefV2');
 const TestERC20 = contract.fromArtifact('TESTERC20');
 const decimal = new BN(18);
 const oneether = (new BN(10)).pow(decimal);
@@ -45,30 +46,36 @@ describe('Governance', function () {
         // console.log("Time lock address ",this.timelock.address);
 
         this.chef = await MasterChef.new({from: ownerAddress, gas: 8000000});
-        await this.chef.initialize(this.astra.address, ownerAddress, "1000", "0", "1000", {from: ownerAddress, gas: 8000000});
-        await this.chef.add(this.astra.address,{ from: ownerAddress })
-        await this.chef.addVault("0", { from: ownerAddress });
-        await this.chef.addVault("6", { from: ownerAddress });
+        await this.chef.initialize(this.astra.address , "0", "1000", "1000000", {from: ownerAddress, gas: 8000000});
+        // await this.chef.add(100, this.astra.address, true, { from: ownerAddress })
+
         this.govern = await Governance.new(this.timelock.address,this.astra.address,{from: ownerAddress, gas: 8000000});
         await this.govern.initialize(this.timelock.address,this.astra.address,this.chef.address,{from: ownerAddress, gas: 8000000});
-        await this.chef.setDaoAddress(this.govern.address, { from: ownerAddress });
+        await this.chef.whitelistDepositContract(this.govern.address, true, { from: ownerAddress });
         // console.log("Governance address ",this.govern.address);
     });
     describe("Configuring Astra contract", function(){
          beforeEach(async function () {
             const transferValue = (new BN(100)).mul(oneether);
             await this.astra.transfer(userAddress1, transferValue, { from: ownerAddress })
+            await this.astra.transfer(userAddress2, transferValue, { from: ownerAddress })
             var amount= (new BN(30)).mul(oneether);
             await this.astra.mint(userAddress1,amount,{from:ownerAddress});
             await this.timelock.setPendingAdmin(this.govern.address,{from:ownerAddress});
             await this.govern._acceptAdmin({from:ownerAddress});
             await this.astra.mint(userAddress2,amount,{from:ownerAddress});
+
+            await this.astra.approve(this.chef.address, (new BN(10000)).mul(oneether), { from: ownerAddress });
+            await this.chef.deposit( (new BN(100)).mul(oneether),"0","0", false , { from: ownerAddress })
+
+            const stakeValue = (new BN(50)).mul(oneether);
+            await this.astra.approve(this.chef.address, stakeValue, { from: userAddress1 });
+            await this.chef.deposit( stakeValue,12,"0", false, { from: userAddress1 })
+
+            await this.astra.approve(this.chef.address, stakeValue, { from: userAddress2 });
+            await this.chef.deposit( stakeValue,12,"0", false, { from: userAddress2 })
+
           })
-          describe("Check configuration of contracts ",function(){
-              it("New tokens minted successfully",async function(){   
-                expect(await this.astra.balanceOf(userAddress1)).to.be.bignumber.equal((new BN(130)).mul(oneether));
-              });
-          });
 
           describe("Test new Voting Acceptance ",function(){
             var callDatas,targets,values,signatures,description;
@@ -79,13 +86,8 @@ describe('Governance', function () {
                 signatures = ["updateQuorumValue(uint256)"];
                 callDatas = [encodeParameters(['uint256'],[originalquorom])];
                 description = "Update Quorumvalue to 3 percentage";
-                await this.astra.approve(this.chef.address, "1000", { from: ownerAddress });
-                await this.chef.addVault(12, { from: ownerAddress });
-                await this.chef.deposit(0, "100","0", { from: ownerAddress })
 
-                const stakeValue = (new BN(50)).mul(oneether);
-                await this.astra.approve(this.chef.address, stakeValue, { from: userAddress1 });
-                await this.chef.deposit(0, stakeValue,12, { from: userAddress1 })
+
                 await this.astra.approve(this.govern.address, totalSupply, { from: ownerAddress }); 
                 time.increase(2592000);  
               
@@ -98,7 +100,7 @@ describe('Governance', function () {
                 await this.govern.castVote(1,true,{from:ownerAddress});
                 await this.govern.castVote(1,true,{from:userAddress1});
                 await time.advanceBlockTo(parseInt(latestBlock)+12);
-                expect(await this.govern.state(1)).to.be.bignumber.equal(new BN(4));
+                expect(await this.govern.state(1)).to.be.bignumber.equal(new BN(3));
               })
 
               it("Should defeat the proposal if not enough governot votes non fundamental changes",async function(){
@@ -115,7 +117,7 @@ describe('Governance', function () {
                 await this.govern.propose(targets,values,signatures,callDatas,description,false,{from:ownerAddress})
                 let latestBlock = await time.latestBlock();
                 await time.advanceBlockTo(parseInt(latestBlock)+3);
-                await this.govern.castVote(1,true,{from:ownerAddress});
+                // await this.govern.castVote(1,true,{from:ownerAddress});
                 await this.govern.castVote(1,true,{from:userAddress3});
                 await this.govern.castVote(1,true,{from:userAddress2});
                 await time.advanceBlockTo(parseInt(latestBlock)+13);
@@ -138,6 +140,7 @@ describe('Governance', function () {
                 await time.advanceBlockTo(parseInt(latestBlock)+3);
                 await this.govern.castVote(1,true,{from:ownerAddress});
                 await this.govern.castVote(1,true,{from:userAddress1});
+                await this.govern.castVote(1,true,{from:userAddress2});
                 await time.advanceBlockTo(parseInt(latestBlock)+13);
                 expect(await this.govern.state(1)).to.be.bignumber.equal(new BN(4));
               })
@@ -146,7 +149,8 @@ describe('Governance', function () {
                 await this.govern.propose(targets,values,signatures,callDatas,description,false,{from:ownerAddress})
                 let latestBlock = await time.latestBlock();
                 await time.advanceBlockTo(parseInt(latestBlock)+3);
-                await this.govern.castVote(1,true,{from:userAddress1});
+                await this.govern.castVote(1,true,{from:ownerAddress});
+                await this.govern.castVote(1,true,{from:userAddress2});
                 await time.advanceBlockTo(parseInt(latestBlock)+13);
                 expect(await this.govern.state(1)).to.be.bignumber.equal(new BN(4));
             })
@@ -161,12 +165,6 @@ describe('Governance', function () {
                 signatures = ["updateQuorumValue(uint256)"];
                 callDatas = [encodeParameters(['uint256'],[originalquorom])];
                 description = "Update Quorumvalue to 3 percentage";
-                await this.astra.approve(this.chef.address, "1000", { from: ownerAddress });
-                await this.chef.addVault(12, { from: ownerAddress });
-                await this.chef.deposit(0, "100","0", { from: ownerAddress })
-                const stakeValue = (new BN(50)).mul(oneether);
-                await this.astra.approve(this.chef.address, stakeValue, { from: userAddress1 });
-                await this.chef.deposit(0, stakeValue,12, { from: userAddress1 })
                 await this.astra.approve(this.govern.address, totalSupply, { from: ownerAddress }); 
                 time.increase(2592000);  
             })
@@ -177,61 +175,30 @@ describe('Governance', function () {
               await time.advanceBlockTo(parseInt(latestBlock)+3);
               await this.govern.castVote(1,true,{from:ownerAddress});
               await this.govern.castVote(1,true,{from:userAddress1});
+              await this.govern.castVote(1,true,{from:userAddress2});
               // await time.advanceBlockTo(parseInt(latestBlock)+13);
               expect(await this.govern.state(1)).to.be.bignumber.equal(new BN(1));
             })
 
-            it("Should not accepts the proposal for non  fundmental changes if time exceeds",async function(){
+            it("Should not fast forward changes if on day time exceeds",async function(){
               await this.govern.propose(targets,values,signatures,callDatas,description,false,{from:ownerAddress})
               let latestBlock = await time.latestBlock();
               await time.advanceBlockTo(parseInt(latestBlock)+3);
               await this.govern.castVote(1,true,{from:userAddress1});
-              await time.advanceBlockTo(parseInt(latestBlock)+13);
-              expect(await this.govern.state(1)).to.be.bignumber.equal(new BN(4));
+              await time.increase(86410);
+              expect(await this.govern.state(1)).to.be.bignumber.equal(new BN(1));
             })
 
             it("Should accepts the proposal for non  fundmental changes",async function(){
               await this.govern.propose(targets,values,signatures,callDatas,description,false,{from:ownerAddress})
-              let btimeProposal = await this.govern.proposalCreatedTime(1);
               let latestBlock = await time.latestBlock();
-              console.log("before proposal Time ",parseInt(btimeProposal));
-              console.log("before latest block ",parseInt(latestBlock));
-              
               await time.advanceBlockTo(parseInt(latestBlock)+3);
-              await this.govern.castVote(1,true,{from:userAddress1});
-              // await time.advanceBlockTo(parseInt(latestBlock)+13);
-              let atimeProposal = await this.govern.proposalCreatedTime(1);
-              let alatestBlock = await time.latestBlock();
-              let fastVoteStatus = await this.govern.checkfastvote(1);
-              let proposaldetails = await this.govern.proposals(1);
-              let quorumVotes = await this.govern.quorumVotes();
-              console.log("after proposal Time ",parseInt(atimeProposal));
-              console.log("after latest block ",parseInt(alatestBlock));
-              console.log("Check Fast Vote status", fastVoteStatus);
-              console.log("For votes   ",parseInt(proposaldetails.forVotes));
-              console.log("quorumVotes ",parseInt(quorumVotes));
-              console.log("End block ",parseInt(proposaldetails.endBlock));
+              await this.govern.castVote(1,true,{from:ownerAddress});
+              await this.govern.castVote(1,true,{from:userAddress2});
+              await time.advanceBlockTo(parseInt(latestBlock)+13);
               expect(await this.govern.state(1)).to.be.bignumber.equal(new BN(4));
             })
           });
-
-          describe("Test the highest stakig score",function(){
-            var callDatas,targets,values,signatures,description;
-            var originalquorom = 30;
-            beforeEach(async function () {
-                targets = [this.govern.address];
-                values = [0];
-                signatures = ["updateQuorumValue(uint256)"];
-                callDatas = [encodeParameters(['uint256'],[originalquorom])];
-                description = "Update Quorumvalue to 3 percentage";
-                await this.astra.approve(this.chef.address, "1000", { from: ownerAddress });
-                // await this.chef.deposit(0, "100","0", { from: ownerAddress })
-                await this.astra.approve(this.govern.address, totalSupply, { from: ownerAddress }); 
-            })
-              it("Should Revert if staking score functionality not matched",async function(){
-                await expectRevert(this.govern.propose(targets,values,signatures,callDatas,description,true,{from:ownerAddress}), "GovernorAlpha::propose: Only Top stakers can create proposal");
-              })
-          })
         describe("Propose",function(){
             var callDatas,targets,values,signatures,description;
             var originalquorom = 30;
@@ -241,12 +208,6 @@ describe('Governance', function () {
                 signatures = ["updateQuorumValue(uint256)"];
                 callDatas = [encodeParameters(['uint256'],[originalquorom])];
                 description = "Update Quorumvalue to 3 percentage";
-                await this.astra.approve(this.chef.address, "1000", { from: ownerAddress });
-                await this.chef.addVault(12, { from: ownerAddress });
-                await this.chef.deposit(0, "100","0", { from: ownerAddress })
-                const stakeValue = (new BN(50)).mul(oneether);
-                await this.astra.approve(this.chef.address, stakeValue, { from: userAddress1 });
-                await this.chef.deposit(0, stakeValue,12, { from: userAddress1 })
                 await this.astra.approve(this.govern.address, totalSupply, { from: ownerAddress }); 
                 time.increase(2592000);  
                 await this.govern.propose(targets,values,signatures,callDatas,description,true,{from:ownerAddress})
@@ -259,9 +220,9 @@ describe('Governance', function () {
                 beforeEach(async function () {
                     await time.advanceBlock();
                     await time.advanceBlock(); 
-                    await this.govern.castVote(1,true,{from:userAddress1});
                 })
                 it("Voted successfully",async function(){
+                   await this.govern.castVote(1,true,{from:userAddress1});
                     var votes = await this.govern.proposals(1);
                     expect(votes[5]).to.be.bignumber.equal((new BN(90)).mul(oneether));
                 })
@@ -271,6 +232,8 @@ describe('Governance', function () {
                 describe("Queue",function(){
                     beforeEach(async function () {
                       await this.govern.castVote(1,true,{from:ownerAddress});
+                      await this.govern.castVote(1,true,{from:userAddress1});
+                      await this.govern.castVote(1,true,{from:userAddress2})
                         const latestBlock = await time.latestBlock();
                         var details = await this.govern.proposals(1);
                         await time.advanceBlockTo(parseInt(latestBlock)+13);

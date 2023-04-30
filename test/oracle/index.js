@@ -177,7 +177,7 @@ describe('DAA', function () {
                 expect(parseInt(data[3])).to.be.equal(400);
             });
             it("Should Revert if non provable tries to update", async function () {
-                await expectRevert(this.Oracle.__callback("0x1000000000000000000000000000000000000000000000000000000000000000","avgadbg",{from:userAddress1,gas: 8000000}),"invalid opcode");
+                await expectRevert(this.Oracle.__callback("0x1000000000000000000000000000000000000000000000000000000000000000","avgadbg",{from:userAddress1,gas: 8000000}),"Panic: Arithmetic overflow");
             });
         }) 
 

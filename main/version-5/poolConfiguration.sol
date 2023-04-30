@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: BUSL-1.1
+pragma solidity 0.8.19;
 
-/**
-  Not This is not the complete code it will pushed soon.
-*/
-pragma solidity 0.5.17;
-
-// import "../../other/token.sol";
-import "../../other/1inch.sol";
-import "../../other/Initializable.sol";
+import "./library/1inch.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
 interface Iitokendeployer{
 	function createnewitoken(string calldata _name, string calldata _symbol) external returns(address);
@@ -22,8 +18,8 @@ contract PoolConfiguration is Initializable {
     using SafeMath for uint;
 	// Astra contract address
 	address public ASTRTokenAddress;
-	// Manager address
-	address public managerAddresses;
+	// Admin address
+	address public adminAddress;
 	//Oracle contract addressess
 	address public Oraclecontract;
 	// Early exit fees
@@ -33,52 +29,53 @@ contract PoolConfiguration is Initializable {
     // Maximum number of tokens supported by indices
 	uint256 private maxTokenSupported;
 
+	address public treasuryAddress;
+
 	// Slippage rate.
 	uint256 public slippagerate;
 	//Supported stable coins
 	mapping(address => bool) public supportedStableCoins;
 
 	// Enabled DAO address
-	mapping(address => bool) public enabledDAO;
+	address public enabledDAO;
+
+	address public paymentContractAddress;
 	
 	// Admin addresses
-	mapping(address => bool) public systemAddresses;
-	/**
-     * @dev Modifier to check if the caller is Admin or not.
-     */
-	modifier systemOnly {
-	    require(systemAddresses[msg.sender], "system only");
-	    _;
-	}
+	mapping(address => bool) public isBlackListed;
+
+	event SetOracleaddress(address indexed _address);
+	event SetTreasuryAddress(address indexed _address);
+	event WhitelistDAOaddress(address indexed _address);
+	event SetPaymentAddress(address indexed _address);
+	event UpdateBlackListStatus(address indexed _address, bool _status);
+	event AddStable(address indexed _stable);
+	event RemoveStable(address indexed _stable);
+	event Updateadmin(address indexed _address);
+	event UpdateEarlyExitFees(uint256 indexed _feesper);
+	event UpdatePerfees(uint256 indexed _feesper);
+	event UpdateMaxToken(uint256 indexed _maxTokenSupported);
+	event UpdateSlippagerate(uint256 indexed _slippagerate);
+
 	/**
      * @dev Modifier to check if the caller is dao or not
      */
 	modifier DaoOnly{
-	    require(enabledDAO[msg.sender], "dao only");
+	    require(enabledDAO == msg.sender, "dao only");
 	    _;
 	}
 	/**
-     * @dev Modifier to check if the caller is manager or not
+     * @dev Modifier to check if the caller is admin or not
      */
-	modifier whitelistManager {
-	    require(managerAddresses == msg.sender, "Manager only");
+	modifier adminOnly {
+	    require(adminAddress == msg.sender, "Admin only");
 	    _;
 	}
 
-	/**
-	 * @dev Add admin address who has overall access of contract.
-	 */
-		
-	function addSystemAddress(address newSystemAddress) public systemOnly {
-		require(newSystemAddress != address(0), "Zero Address"); 
-	    systemAddresses[newSystemAddress] = true;
-	}
-	
 	function initialize(address _ASTRTokenAddress) public initializer{
 		require(_ASTRTokenAddress != address(0), "Zero Address");
-		systemAddresses[msg.sender] = true;
 		ASTRTokenAddress = _ASTRTokenAddress;
-		managerAddresses = msg.sender;
+		adminAddress = msg.sender;
 		earlyexitfees = 2;
 		performancefees = 20;
 		maxTokenSupported = 10;
@@ -90,58 +87,91 @@ contract PoolConfiguration is Initializable {
 	 * @dev Add DAO address who can update the function details.
 	 */
 	
-	function whitelistDAOaddress(address _address) external whitelistManager {
+	function whitelistDAOaddress(address _address) external adminOnly {
 		require(_address != address(0), "Zero Address");
-	    require(!enabledDAO[_address],"whitelistDAOaddress: Already whitelisted");
-	    enabledDAO[_address] = true;
-	  
+	    require(enabledDAO !=  _address,"whitelistDAOaddress: Already whitelisted");
+	    enabledDAO = _address; 
+		emit WhitelistDAOaddress(_address); 
 	}
 
 	/**
 	 * @notice Set Oracle Address
 	 * @param _address Oracle conractaddress
-	 * @dev Add Oracle address from where PoolV1 get the details. Only manager can update no proposal required for this.
+	 * @dev Add Oracle address from where PoolV1 get the details. Only admin can update no proposal required for this.
 	 */
 
-	function setOracleaddress(address _address) external whitelistManager {
+	function setOracleaddress(address _address) external adminOnly {
 		require(_address != address(0), "Zero Address");
 		require(_address != Oraclecontract, "setOracleaddress: Already set");
 		Oraclecontract = _address;
+		emit SetOracleaddress(_address);
 	}
 
 	/**
-	 * @notice Remove DAO Address
-	 * @param _address DAO conractaddress
-	 * @dev Remove DAO address who can update the function details. To remove the access from DAO.
+	 * @notice Set Treasury address
+	 * @param _address Treasury address
+	 * @dev This address will recieve fees from the index contract.
 	 */
-	function removeDAOaddress(address _address) external whitelistManager {
+
+	function setTreasuryAddress(address _address) external adminOnly {
 		require(_address != address(0), "Zero Address");
-	    require(enabledDAO[_address],"removeDAOaddress: Not whitelisted");
-	    enabledDAO[_address] = false;
-	  
+		treasuryAddress = _address;
+		emit SetTreasuryAddress(_address);
+	}
+
+	/**
+	 * @notice Set Payment contract address
+	 * @param _address Payment address
+	 * @dev This contract will validate index payment.
+	 */
+
+	function setPaymentAddress(address _address) external adminOnly {
+		require(_address != address(0), "Zero Address");
+		paymentContractAddress = _address;
+		emit SetPaymentAddress(_address);
+	}	
+
+	/**
+	 * @notice Set Blacklist status
+	 * @param _address User address
+	 * @param _status Status
+	 * @dev Block list any user from depositing in index.
+	 */
+
+	function updateBlackListStatus(address _address, bool _status) external adminOnly {
+		require(_address != address(0), "Zero Address");
+		isBlackListed[_address] = _status;
+		emit UpdateBlackListStatus(_address, _status);
+	}
+
+	function isAdmin(address _address) external view returns(bool){
+		return (adminAddress == _address);
 	}
 
 	function addStable(address _stable) external DaoOnly{
 		require(_stable != address(0), "Zero Address");
 		require(supportedStableCoins[_stable] == false,"addStable: Stable coin already added");
 		supportedStableCoins[_stable] = true;
+		emit AddStable(_stable);
 	}
 
 	function removeStable(address _stable) external DaoOnly{
 		require(_stable != address(0), "Zero Address");
 		require(supportedStableCoins[_stable] == true,"removeStable: Stable coin already removed");
 		supportedStableCoins[_stable] = false;
+		emit RemoveStable(_stable);
 	}
 	
 	/**
-	 * @notice Remove whitelist manager address
+	 * @notice Remove whitelist admin address
 	 * @param _address User address
-	 * @dev Update the address of manager. By default it is contract deployer. Manager has permission to update the dao address.
+	 * @dev Update the address of admin. By default it is contract deployer. Admin has permission to update the dao address.
 	 */
-	function updatewhitelistmanager(address _address) external whitelistManager{
+	function updateadmin(address _address) external adminOnly {
 		require(_address != address(0), "Zero Address");
-	    require(_address != managerAddresses,"updatewhitelistmanager: Already Manager");
-	    managerAddresses = _address;
+	    require(_address != adminAddress,"updateadmin: Already admin");
+	    adminAddress = _address;
+		emit Updateadmin(_address);
 	}  
 
 	/**
@@ -151,8 +181,9 @@ contract PoolConfiguration is Initializable {
 	 */  
 
 	function updateEarlyExitFees (uint256 _feesper) external DaoOnly{
-        require(_feesper<100,"updateEarlyExitFees: Only less than 100");
+        require(_feesper<50,"updateEarlyExitFees: Only less than 100");
         earlyexitfees = _feesper;
+		emit UpdateEarlyExitFees(_feesper);
     }
 
 	/**
@@ -162,8 +193,9 @@ contract PoolConfiguration is Initializable {
 	 */ 
 
      function updatePerfees (uint256 _feesper) external DaoOnly{
-        require(_feesper<100,"updatePerfees: Only less than 100");
+        require(_feesper<50,"updatePerfees: Only less than 100");
         performancefees = _feesper;
+		emit UpdatePerfees(_feesper);
     }
 
     /**
@@ -175,6 +207,7 @@ contract PoolConfiguration is Initializable {
      function updateMaxToken (uint256 _maxTokenSupported) external DaoOnly{
         require(_maxTokenSupported<100,"updateMaxToken: Only less than 100");
         maxTokenSupported = _maxTokenSupported;
+		emit UpdateMaxToken(_maxTokenSupported);
     }
 
 	/**
@@ -184,8 +217,9 @@ contract PoolConfiguration is Initializable {
 	 */ 
 
 	function updateSlippagerate (uint256 _slippagerate) external DaoOnly{
-        require(_slippagerate<100,"updateSlippagerate: Only less than 100");
+        require(_slippagerate<30,"updateSlippagerate: Only less than 100");
         slippagerate = _slippagerate;
+		emit UpdateSlippagerate(_slippagerate);
     }
 
 	/** 
@@ -217,7 +251,7 @@ contract PoolConfiguration is Initializable {
 	 * @dev Check if Address has dao permission or not. This will be used to check if the account is whitelisted or not.
 	 */   
 	  function checkDao(address daoAddress) external view returns(bool){
-		  return enabledDAO[daoAddress];
+		  return enabledDAO == daoAddress;
 	  }
 
 	  /** 

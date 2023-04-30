@@ -1,7 +1,5 @@
-// SPDX-License-Identifier: MIT
-// OpenZeppelin Contracts v4.4.1 (token/ERC721/IERC721.sol)
-
-pragma solidity ^0.6.0;
+// SPDX-License-Identifier: GPL-2.0-or-later
+pragma solidity ^0.8.0;
 
 /**
  * @dev Required interface of an ERC721 compliant contract.

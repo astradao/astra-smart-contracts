@@ -99,7 +99,7 @@ describe('Itoken', function () {
                     await this.itoken.mint(ownerAddress, (new BN(100000).mul(oneether)), {from:userAddress3});
                 });
                 it("WithOut Approve", async function () {
-                    await expectRevert(this.itoken.transferFrom(ownerAddress, userAddress3,1000,{from:ownerAddress}),"ERC20: transfer amount exceeds allowance");
+                    await expectRevert(this.itoken.transferFrom(ownerAddress, userAddress3,1000,{from:ownerAddress}),"ERC20: insufficient allowance");
                 })
                 it("Tranfer from Account 1 to Account 2", async function () {
                     await this.itoken.approve(userAddress3, (new BN(50000).mul(oneether)), { from: ownerAddress });
@@ -157,7 +157,7 @@ describe('Itoken', function () {
                 });
     
                 it("TranferFrom failed without allowance", async function () {
-                    await expectRevert(this.itoken.transferFrom(ownerAddress, userAddress3, 500, {from:userAddress2}), "ERC20: transfer amount exceeds allowance");
+                    await expectRevert(this.itoken.transferFrom(ownerAddress, userAddress3, 500, {from:userAddress2}), "ERC20: insufficient allowance");
                 });
     
                 it("TranferFrom with allowance", async function () {

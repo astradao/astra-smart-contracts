@@ -1,13 +1,13 @@
-// SPDX-License-Identifier: MIT
-pragma solidity 0.6.12;
+// SPDX-License-Identifier: BUSL-1.1
+pragma solidity 0.8.19;
 pragma experimental ABIEncoderV2;
 
-import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/math/SafeMathUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/math/SafeMathUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/token/ERC20/SafeERC20Upgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/proxy/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "./interface/KeeperCompatible.sol";
 
 /**
@@ -15,7 +15,7 @@ import "./interface/KeeperCompatible.sol";
  */
 contract TokenVesting is
     Initializable,
-    OwnableUpgradeable,
+    Ownable2StepUpgradeable,
     ReentrancyGuardUpgradeable,
     KeeperCompatibleInterface
 {
@@ -76,7 +76,7 @@ contract TokenVesting is
         initializer
     {
         require(token_ != address(0x0));
-        __Ownable_init();
+        __Ownable2Step_init();
         __ReentrancyGuard_init();
         _token = IERC20Upgradeable(token_);
         keeperLastUpdatedTime = block.timestamp;
@@ -343,7 +343,9 @@ contract TokenVesting is
         bytes32 element = vestingSchedulesIds[
             vestingSchedulesIds.length.sub(1)
         ];
-        vestingSchedulesIds[userVestingScheduleId[vestingScheduleId]] = element;
+        uint256 tempVestingId = userVestingScheduleId[vestingScheduleId];
+        vestingSchedulesIds[tempVestingId] = element;
+        userVestingScheduleId[element] = tempVestingId;
         vestingSchedulesIds.pop();
 
         emit Revoked(vestingSchedule.beneficiary, vestingScheduleId);
@@ -510,5 +512,15 @@ contract TokenVesting is
 
     function getCurrentTime() internal view virtual returns (uint256) {
         return block.timestamp;
+    }
+
+    function viewUserVestingDetailsIndex(bytes32 _vestingScheduleId) public view returns(uint256){
+        return userVestingScheduleId[_vestingScheduleId];
+    }
+
+    function resetRevokeIDs(bytes32[] memory _vestingIds, uint256[] memory _vestingIndex) external onlyOwner {
+        for(uint256 i=0; i<_vestingIds.length; i++){
+            userVestingScheduleId[_vestingIds[i]] = _vestingIndex[i];
+        }
     }
 }

@@ -1,20 +1,19 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: BUSL-1.1
+pragma solidity 0.8.19;
 
-pragma solidity 0.6.12;
-
-import "@openzeppelin/contracts-upgradeable/math/SafeMathUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/math/SafeMathUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20BurnableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/proxy/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
 contract Token is
     Initializable,
     ERC20Upgradeable,
     ERC20BurnableUpgradeable,
     PausableUpgradeable,
-    OwnableUpgradeable
+    Ownable2StepUpgradeable
 {
     using SafeMathUpgradeable for uint256;
     address public allocationContract;
@@ -33,9 +32,9 @@ contract Token is
     event SetSellLimitTime(uint256 blocks);
 
     function initialize(address _allocationContract) external initializer {
-        __ERC20_init("Astra DAO", "ASTRA");
+        __ERC20_init("Astra", "ASTRA");
         __ERC20Burnable_init();
-        __Ownable_init();
+        __Ownable2Step_init();
         __Pausable_init();
         allocationContract = _allocationContract;
         _mint(allocationContract, 100000000000000 * uint256(10)**decimals());

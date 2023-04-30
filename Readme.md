@@ -1,39 +1,47 @@
-Setup 
-1. Install latest Nodejs version and truffle.
+# Astra DAO
 
-2. Clone the project in your working directory.
+Astra DAO is an automated crypto asset allocator, built on Ethereum to provide advanced investment strategies to retail participants. The innovative model creates a win-win incentive for index investors, creators, and token holders. Astra DAO simplifies passive investing for retail participants by providing an array of Crypto Indices. Astra DAO aims to help crypto investors compete with quantitative investment funds by finding winning investments and trades.
+## Getting Started
 
-3. Run command from terminal "npm run install" to install all the dependencies.
+To get started, clone this repository and install the dependencies:
 
-4. Complie contract "npm run compile".
+```bash
+git clone https://github.com/repostiory_url
+cd astra-dao
+npm install
+```
 
-5. Run test "npm run mocha".
+## Complie
+To compile contracts, use the following command:
 
-6. Deploy "npx hardhat --network kovan run scripts/deploy.js". Before running this command please set private key and infura id in hardhat configuration file.
+```bash
+// This command will compile using truffle.
+npm run compile
 
+// This command will compile using hardhat.
+npx hardhat compile
+```
 
-Contracts Files
+## Testing
+To run the unit tests for the contracts, use the following command:
 
-Astra/Itoken staking: version-6/chef.sol
+```bash
+npx hardhat test
+```
 
-Lp token staking: version-6/lm-pool.sol
+## Contributing
 
-Lp token staking(Uniswap version 3): version-6/lm-pool-erc721.sol
+If you would like to contribute to this project, please follow these guidelines:
 
-Astra: version-6/astr.sol
+- Open an issue to discuss the proposed change before implementing it
+ - Follow the existing code style and file structure
+ - Write unit tests for your changes
+ - Submit a pull request with a detailed description of your changes
 
-Indices pool: version-5/poolv2.sol
+Thank you for your contribution!
 
-Uniswap/Sushiswap Aggregator: version-6/swap.sol
+## License
+The primary license for Astra is the Business Source License 1.1 (BUSL-1.1), see LICENSE. However, some files are dual licensed under GPL-2.0-or-later:
 
-Indices pool configuration: version-5/poolConfiguration.sol
-
-Payment: version-5/indicespayment.sol
-
-Governance: version-5/governance.sol
-
-Oracle: version-5/Oracle.sol
-
-Itoken: version-5/itoken.sol
-
-Vesting: version-6/treasury-vesting.sol
+- All files in main/version-6/interfaces/ may also be licensed under GPL-2.0-or-later (as indicated in their SPDX headers), see [contracts/interfaces/LICENSE](https://github.com/astradao/astra-private/main/license-upgrade/astra-smartcontracts/LICENSE)
+- All files in libraries, mock folders and provable files remain unlicensed.

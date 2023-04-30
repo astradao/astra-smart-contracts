@@ -1,9 +1,9 @@
-pragma solidity 0.5.17;
+// SPDX-License-Identifier: BUSL-1.1
+pragma solidity 0.8.19;
 
-import "../../other/token.sol";
-//Use provable.sol for testnet/Mainnet
 import "./mockprovable.sol";
-import "../../other/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/math/SafeMathUpgradeable.sol";
 
 
 interface IPool{
@@ -134,8 +134,8 @@ library strings {
     }
 }
 
-contract DAAORacleMock is usingProvable, Initializable {
-    using SafeMath for uint;
+contract DAAORacleMock is Initializable, usingProvable  {
+    using SafeMathUpgradeable for uint;
     using strings for *;
     address public whitelistmanager;
     address public _owner;
@@ -314,7 +314,7 @@ contract DAAORacleMock is usingProvable, Initializable {
      * @dev Add new pool details. Initially first pool have to be entered manually with datasource.
      */
 
-    function AddNewPoolTokens(address[] memory _tokens, uint[] memory _weights,uint _threshold,uint _rebalanceTime,string memory _name, string memory _symbol,string memory _datasource, string memory _description) public whitelistedonly returns(bool){
+    function AddNewPoolTokens(address[] memory _tokens, uint[] memory _weights,uint _threshold,uint _rebalanceTime,string memory _name, string memory _symbol,string memory _datasource, string memory _description) public whitelistedonly {
         require(_tokens.length == _weights.length, "Invalid configurations");	   
         poolInfo.push(PoolInfo({
             tokens: _tokens,
@@ -343,7 +343,7 @@ contract DAAORacleMock is usingProvable, Initializable {
     /**
      * @dev Update the configuration mannually. In case details not came from the AI manager can manually update the pool.
      */
-    function UpdatePoolConfiguration(address[] memory _tokens, uint[] memory _weights, uint _poolIndex,uint _threshold,uint _rebalanceTime) public whitelistedonly returns(bool){
+    function UpdatePoolConfiguration(address[] memory _tokens, uint[] memory _weights, uint _poolIndex,uint _threshold,uint _rebalanceTime) public whitelistedonly {
 	    require(_tokens.length == _weights.length, "Invalid configurations");
         poolInfo[_poolIndex].tokens = _tokens;
         poolInfo[_poolIndex].weights = _weights;

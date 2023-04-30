@@ -1,127 +1,240 @@
-const { accounts, contract, privateKeys } = require('@openzeppelin/test-environment');
-
-const { BN, expectRevert, time, expectEvent, constants } = require('@openzeppelin/test-helpers');
-const { expect } = require('chai');
-const { signTypedData } = require('eth-sig-util');
-
-const MAX_DEPLOYED_BYTECODE_SIZE = 24576;
-
-const Astrsample = contract.fromArtifact('Token');
-const TestERC20 = contract.fromArtifact('TESTERC20');
-const MocKExchange = contract.fromArtifact('MockExchangeUniswap');
-
-const Payment = contract.fromArtifact('IndicesPayment');
-const PoolConfiguration  =  contract.fromArtifact('PoolConfiguration');
-
-
+const { ethers, upgrades } = require("hardhat");
+const { expect } = require("chai");
 const {
-    address,
-    minerStart,
-    minerStop,
-    unlockedAccount,
-    mineBlock
-} = require('../../Util/Ethereum');
-const EIP712 = require('../../Util/EIP712');
+  abi: ERC20ABI,
+} = require("@openzeppelin/contracts/build/contracts/ERC20.json");
+const Address = require("../../Util/Address.json");
+const Holder = require("../../Util/Holders.json");
 
-const zeroaddress = "0x0000000000000000000000000000000000000000";
-const ETH_ADDRESS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
-const decimal = new BN(18);
-const oneether = (new BN(10)).pow(decimal);
-const totalSupply = (new BN(1000)).mul(oneether)
-const totalSupplyusdt = (new BN(1000)).mul((new BN(10)).pow((new BN(6))))
-const totalSupplyusdc = (new BN(1000)).mul((new BN(10)).pow((new BN(24))))
+describe("Payment", () => {
+  let owner, addr1, addr2, addrs;
+  let astra, dai, usdt, usdc;
+  let token1, token2, token3, token4;
+  let swapV2, poolConfiguration, payment;
 
-describe('Initializing', function () {
-    const [ ownerAddress, userAddress1, userAddress2, userAddress3 ] = accounts;
-    beforeEach(async function() {
-        this.astra = await Astrsample.new({ from: ownerAddress, gas: 8000000 });
-        await this.astra.initialize(ownerAddress, { from: ownerAddress });
-        this.dai = await TestERC20.new("Dai", "ASTR",18, {from: ownerAddress, gas: 8000000});
-        this.usdt = await TestERC20.new("USDT", "USDT",6, {from: ownerAddress, gas: 8000000});
-        this.usdc = await TestERC20.new("USDC", "USDC",24, {from: ownerAddress, gas: 8000000});
-        this.weth = await TestERC20.new("Weth", "WETH",18, {from: ownerAddress, gas: 8000000});
-        this.token1 = await TestERC20.new("Token 1", "TOKEN1",18, {from: ownerAddress, gas: 8000000});
-        this.token2 = await TestERC20.new("Token 2", "TOKEN2",18, {from: ownerAddress, gas: 8000000});
-        this.token3 = await TestERC20.new("Token 3", "TOKEN3",18, {from: ownerAddress, gas: 8000000});
-        this.token4 = await TestERC20.new("Token 4", "TOKEN4",18, {from: ownerAddress, gas: 8000000});
-        this.mockexchange = await MocKExchange.new(this.token1.address,this.token2.address,this.token3.address,this.token4.address,this.dai.address,this.astra.address,{from:ownerAddress,gas: 8000000});
-        this.poolconfiguration = await PoolConfiguration.new({from: ownerAddress,gas: 8000000})
-        this.poolconfiguration.initialize(this.astra.address,{from: ownerAddress, gas: 8000000})
-        this.payment = await Payment.new({from: ownerAddress, gas: 8000000});
-        await this.payment.initialize(this.astra.address,this.poolconfiguration.address,this.mockexchange.address,userAddress3,{from:ownerAddress,gas: 8000000});
-        await this.dai.transfer(this.mockexchange.address,totalSupply,{from: ownerAddress, gas: 8000000});
-        await this.usdt.transfer(this.mockexchange.address,totalSupplyusdt,{from: ownerAddress, gas: 8000000});
-        await this.usdc.transfer(this.mockexchange.address,totalSupplyusdc,{from: ownerAddress, gas: 8000000});
-        await this.token1.transfer(this.mockexchange.address,totalSupply,{from: ownerAddress, gas: 8000000});
-        await this.token2.transfer(this.mockexchange.address,totalSupply,{from: ownerAddress, gas: 8000000});
-        await this.token3.transfer(this.mockexchange.address,totalSupply,{from: ownerAddress, gas: 8000000});
-        await this.token4.transfer(this.mockexchange.address,totalSupply,{from: ownerAddress, gas: 8000000});
-        await this.astra.transfer(this.mockexchange.address,totalSupply,{from: ownerAddress, gas: 8000000});
+  const totalSupply = ethers.utils.parseUnits("1000", 18);
+  const totalSupplyUsdt = ethers.utils.parseUnits("10000", 6);
+  const totalSupplyUsdc = ethers.utils.parseUnits("10000", 6);
+
+  const ETH_ADDRESS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
+
+  const getSigner = async (address) => {
+    await hre.network.provider.request({
+      method: "hardhat_impersonateAccount",
+      params: [address],
     });
-    describe("Configuration Test",function(){
-        describe("Set amount",function(){
-            it("Set amount with non owner address",async function(){
-                await expectRevert(this.payment.setAstraAmount(500,{from:userAddress1}),"Ownable: caller is not the owner");
-            })
-            it("Set amount by owner",async function(){
-                // setAstraAmount
-                await this.payment.setAstraAmount(500,{from:ownerAddress})
-                expect(await this.payment.astraAmount()).to.be.bignumber.equal(new BN(500));
-            })  
-        })
-        describe("Set Treasury",function(){
-            it("Set Address with non owner address",async function(){
-                await expectRevert(this.payment.setTreasury(userAddress1,{from:userAddress1}),"Ownable: caller is not the owner");
-            })
-            it("Set Treasury by owner",async function(){
-                await this.payment.setTreasury(userAddress1,{from:ownerAddress})
-                expect(await this.payment.treasury()).to.be.equal(userAddress1);
-            })  
-        })
-        describe("Pay in Astra",function(){
-            it("Should Revert if user try to pay less than 500", async function () {
-                await expectRevert(this.payment.deposit(this.astra.address,500,{from:userAddress1}),"Not enough amount");
-            });
-            it("Should revert if user dont have balance", async function () {
-                await expectRevert(this.payment.deposit(this.astra.address,(new BN(600)).mul(oneether),{from:userAddress1}),"Not enough balance");
-            });
-            it("Deposit", async function () {
-                await this.astra.approve(this.payment.address,totalSupply,{from:ownerAddress})
-                await this.payment.deposit(this.astra.address,(new BN(600)).mul(oneether),{from:ownerAddress});
-                expect(await this.payment.depositedAmount(ownerAddress)).to.be.bignumber.equal((new BN(600)).mul(oneether));
-            });
-        }) 
+    return ethers.getSigner(address);
+  };
 
-        describe("Pay in Ether",function(){
-            it("Should revert if user try to withdraw", async function () {
-                await expectRevert(this.payment.deposit(ETH_ADDRESS,0,{value:20000000000000000,from:userAddress1}),"Not enough amount");
-            });  
-            it("Deposit", async function () {
-                await this.payment.setAstraAmount(500000,{from:ownerAddress})
-                await this.payment.deposit(ETH_ADDRESS,0,{value:500000,from:userAddress1})
-                expect(await this.payment.depositedAmount(userAddress1)).to.be.bignumber.equal(new BN(500000));
-            });
-        })
+  const erc20TokenAt = (tokenAddress) =>
+    ethers.getContractAt(ERC20ABI, tokenAddress, owner);
 
-        describe("Pay in Stable coin",function(){
-            it("Should Revert if user try to pay less than 500", async function () {
-                await this.poolconfiguration.whitelistDAOaddress(ownerAddress,{from:ownerAddress})
-                await this.poolconfiguration.addStable(this.dai.address,{from:ownerAddress})
-                await this.dai.approve(this.payment.address,totalSupply,{from:ownerAddress})
-                await expectRevert(this.payment.deposit(this.dai.address,500,{from:ownerAddress}),"Not enough amount");
-            });
-            it("Should revert if user try to withdraw", async function () {
-                await this.poolconfiguration.whitelistDAOaddress(ownerAddress,{from:ownerAddress})
-                await this.poolconfiguration.addStable(this.dai.address,{from:ownerAddress})
-                await expectRevert(this.payment.deposit(this.dai.address,(new BN(600)).mul(oneether),{from:userAddress1}),"Not enough balance");
-            });
-            it("Deposit", async function () {
-                await this.poolconfiguration.whitelistDAOaddress(ownerAddress,{from:ownerAddress})
-                await this.poolconfiguration.addStable(this.dai.address,{from:ownerAddress})
-                await this.dai.approve(this.payment.address,totalSupply,{from:ownerAddress})
-                await this.payment.deposit(this.dai.address,(new BN(600)).mul(oneether),{from:ownerAddress});
-                expect(await this.payment.depositedAmount(ownerAddress)).to.be.bignumber.equal((new BN(600)).mul(oneether));
-            });
-        })
-    })
-})
+  const deploy = async (name, ...constructorArgs) => {
+    const Contract = await ethers.getContractFactory(name);
+    const contract = await Contract.deploy(...constructorArgs);
+    return contract.deployed();
+  };
+
+  const deployProxy = async (name, args, opts) => {
+    const Contract = await ethers.getContractFactory(name);
+    const contract = await upgrades.deployProxy(Contract, args, opts);
+    return contract.deployed();
+  };
+
+  const deployERC20Token = async (
+    name = "Mock Token",
+    symbol = "MTKN",
+    decimals = 18
+  ) => {
+    const ERC20Token = await ethers.getContractFactory("TESTERC20");
+    const erc20Token = await ERC20Token.deploy(name, symbol, decimals);
+    return erc20Token.deployed();
+  };
+
+  before(async () => {
+    [owner, addr1, addr2, ...addrs] = await ethers.getSigners();
+
+    astra = await erc20TokenAt(Address.ASTRA);
+    dai = await erc20TokenAt(Address.DAI);
+    usdt = await erc20TokenAt(Address.USDT);
+    usdc = await erc20TokenAt(Address.USDC);
+
+    token1 = await deployERC20Token();
+    token2 = await deployERC20Token();
+    token3 = await deployERC20Token();
+    token4 = await deployERC20Token();
+
+    const UniversalERC20 = await ethers.getContractFactory(
+      "main/version-6/swapv2.sol:UniversalERC20"
+    );
+    const universalERC20 = await UniversalERC20.deploy();
+    await universalERC20.deployed();
+
+    const SwapV2 = await ethers.getContractFactory("SwapV2", {
+      libraries: {
+        UniversalERC20: universalERC20.address,
+      },
+    });
+
+    swapV2 = await upgrades.deployProxy(
+      SwapV2,
+      [
+        Address.SUSHISWAP_ROUTER,
+        Address.UNISWAP_V2_ROUTER,
+        Address.UNISWAP_V3_ROUTER,
+        Address.UNISWAP_V3_QUOTER
+      ],
+      { unsafeAllowLinkedLibraries: true }
+    );
+
+    await swapV2.deployed();
+    await swapV2.setTokensPath([Address.ETH, Address.DAI, Address.USDC]);
+
+  });
+
+  beforeEach(async () => {
+    poolConfiguration = await deployProxy("PoolConfiguration", [astra.address]);
+
+    payment = await deployProxy("IndicesPayment", [
+      astra.address,
+      poolConfiguration.address,
+      swapV2.address,
+      addrs[0].address,
+    ]);
+
+    await astra
+      .connect(await getSigner(Holder.ASTRA))
+      .transfer(owner.address, ethers.utils.parseUnits("10000", 18));
+    await dai
+      .connect(await getSigner(Holder.DAI))
+      .transfer(owner.address, ethers.utils.parseUnits("10000", 18));
+    await usdt
+      .connect(await getSigner(Holder.USDT))
+      .transfer(owner.address, ethers.utils.parseUnits("10000", 6));
+    await usdc
+      .connect(await getSigner(Holder.USDC))
+      .transfer(owner.address, ethers.utils.parseUnits("10000", 6));
+
+    await astra.transfer(swapV2.address, totalSupply);
+    await dai.transfer(swapV2.address, totalSupply);
+    await usdt.transfer(swapV2.address, totalSupplyUsdt);
+    await usdc.transfer(swapV2.address, totalSupplyUsdc);
+    await token1.transfer(swapV2.address, totalSupply);
+    await token2.transfer(swapV2.address, totalSupply);
+    await token3.transfer(swapV2.address, totalSupply);
+    await token4.transfer(swapV2.address, totalSupply);
+  });
+
+  describe("Configuration Test", function () {
+    describe("Set amount", function () {
+      it("Set amount with non owner address", async function () {
+        await expect(
+          payment.connect(addr1).setAstraAmount(500)
+        ).to.revertedWith("Ownable: caller is not the owner");
+      });
+
+      it("Set amount by owner", async function () {
+        await payment.setAstraAmount(500);
+        expect(await payment.astraAmount()).to.equal(500);
+      });
+    });
+
+    describe("Set Treasury", function () {
+      it("Set Address with non owner address", async function () {
+        await expect(
+          payment.connect(addr1).setTreasury(addr1.address)
+        ).to.revertedWith("Ownable: caller is not the owner");
+      });
+
+      it("Set Treasury by owner", async function () {
+        await payment.setTreasury(addr1.address);
+        expect(await payment.treasury()).to.be.equal(addr1.address);
+      });
+    });
+
+    describe("Pay in Astra", function () {
+      it("Should Revert if user try to pay less than 500", async function () {
+        await expect(
+          payment.connect(addr1).deposit(astra.address, 500)
+        ).to.revertedWith("Not enough amount");
+      });
+
+      it("Should revert if user don't have balance", async function () {
+        const depositAmount = ethers.utils.parseEther("600");
+        await payment.setAstraAmount(depositAmount);
+        await expect(
+          payment.connect(addr1).deposit(astra.address, depositAmount)
+        ).to.revertedWith("Not enough balance");
+      });
+
+      it("Deposit", async function () {
+        await astra.approve(payment.address, totalSupply);
+
+        const depositAmount = ethers.utils.parseEther("600");
+        await payment.setAstraAmount(depositAmount);
+        await payment.deposit(astra.address, depositAmount);
+
+        expect(await payment.depositedAmount(owner.address)).to.equal(
+          depositAmount
+        );
+      });
+    });
+
+    describe("Pay in Ether", function () {
+      it("Should revert if user try to withdraw", async function () {
+        const depositAmount = ethers.utils.parseEther("0.000000001");
+        await expect(
+          payment
+            .connect(addr1)
+            .deposit(ETH_ADDRESS, 0, { value: depositAmount })
+        ).to.revertedWith("Not enough amount");
+      });
+
+      it("Deposit", async function () {
+        await payment.setAstraAmount(500000);
+        await payment.connect(addr1).deposit(ETH_ADDRESS, 0, { value: 500000 });
+        expect(await payment.depositedAmount(addr1.address)).to.equal(
+          4153362383881742
+        );
+      });
+    });
+
+    describe("Pay in Stable coin", function () {
+      it("Should Revert if user try to pay less than 500", async function () {
+        const astraAmount = ethers.utils.parseEther("5000000000");
+        await payment.setAstraAmount(astraAmount);
+        await poolConfiguration.whitelistDAOaddress(owner.address);
+        await poolConfiguration.addStable(dai.address);
+        await dai.approve(payment.address, totalSupply);
+        const depositAmount = ethers.utils.parseUnits("1", 18);
+        await expect(
+          payment.deposit(dai.address, depositAmount)
+        ).to.revertedWith("Not enough amount");
+      });
+
+      it("Should revert if user try to withdraw", async function () {
+        await poolConfiguration.whitelistDAOaddress(owner.address);
+        await poolConfiguration.addStable(dai.address);
+
+        const depositAmount = ethers.utils.parseEther("600");
+        await expect(
+          payment.connect(addr1).deposit(dai.address, depositAmount)
+        ).to.revertedWith("Not enough balance");
+      });
+
+      it("Deposit", async function () {
+        await poolConfiguration.whitelistDAOaddress(owner.address);
+        await poolConfiguration.addStable(dai.address);
+        await dai.approve(payment.address, totalSupply);
+
+        const depositAmount = ethers.utils.parseEther("600");
+        await payment.setAstraAmount(depositAmount);
+        await payment.deposit(dai.address, depositAmount);
+
+        expect(await payment.depositedAmount(owner.address)).to.equal(
+          "4215482595008996052084274339"
+        );
+      });
+    });
+  });
+});
